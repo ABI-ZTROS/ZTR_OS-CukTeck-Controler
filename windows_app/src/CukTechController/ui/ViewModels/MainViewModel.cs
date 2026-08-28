@@ -19,6 +19,7 @@ public class MainViewModel : INotifyPropertyChanged
 {
     private readonly WindowsScanner _scanner = WindowsScanner.Instance;
     private readonly WindowsConnector _connector = WindowsConnector.Instance;
+    private readonly TokenRepository _tokenRepo = TokenRepository.Instance;
 
     private ObservableCollection<ScanResult> _scanResults = new();
     private ScanResult? _selectedScanResult;
@@ -142,15 +143,48 @@ public class MainViewModel : INotifyPropertyChanged
         try
         {
             var ok = await _connector.ConnectAsync(ParseAddress(SelectedScanResult.DeviceId));
+            if (!ok)
+            {
+                IsConnecting = false;
+                IsConnected = false;
+                StatusMessage = "连接失败";
+                ErrorMessage = "连接失败";
+                return;
+            }
+
+            StatusMessage = "认证中...";
+            var tokenCfg = await _tokenRepo.GetTokenAsync();
+            if (tokenCfg == null || string.IsNullOrEmpty(tokenCfg.Token))
+            {
+                IsConnecting = false;
+                IsConnected = false;
+                StatusMessage = "未连接";
+                ErrorMessage = "未配置 Token";
+                await _connector.DisconnectAsync();
+                return;
+            }
+
+            var authed = await Authenticator.Instance.AuthenticateAsync(_connector, tokenCfg.Token);
+            if (!authed)
+            {
+                IsConnecting = false;
+                IsConnected = false;
+                StatusMessage = "认证失败";
+                ErrorMessage = "认证失败：Token 无效或设备无响应";
+                await _connector.DisconnectAsync();
+                return;
+            }
+
             IsConnecting = false;
-            IsConnected = ok;
-            StatusMessage = ok ? "已连接" : "连接失败";
-            if (!ok) ErrorMessage = "连接失败";
-            else AppLogger.Info($"Connected to {SelectedScanResult.Name}");
+            IsConnected = true;
+            PortDecoderWiring.WireUp(_connector);
+            StatusMessage = "已连接";
+            AppLogger.Info($"Connected and authenticated to {SelectedScanResult.Name}");
         }
         catch (Exception ex)
         {
             IsConnecting = false;
+            IsConnected = false;
             ErrorMessage = $"连接异常: {ex.Message}";
             StatusMessage = "错误";
             AppLogger.Error($"Connect exception: {ex.Message}", ex);
@@ -159,6 +193,7 @@ public class MainViewModel : INotifyPropertyChanged
 
     private async Task DisconnectAsync()
     {
+        PortDecoderWiring.TearDown(_connector);
         try
         {
             await _connector.DisconnectAsync();

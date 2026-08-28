@@ -1,4 +1,5 @@
-import '../logger/logger.dart';
+import 'dart:typed_data';
+import '../utils/logger/logger.dart';
 import '../protocol/crypto.dart';
 import '../protocol/miot_tlv.dart';
 import 'android_connector.dart';
@@ -28,6 +29,7 @@ class EncryptedChannel {
     try {
       // 1. 发送头部
       await connector.write('cmd_send', [0, 0, 0, 0, 1, 0]);
+
       // 2. 等 RCV_RDY
       final rcvRdy = await _wait(connector, 'cmd_send', timeout: timeout);
       if (rcvRdy == null || rcvRdy.length < 4 ||
@@ -35,8 +37,10 @@ class EncryptedChannel {
         AppLogger.instance.w('EncryptedChannel', 'No RCV_RDY');
         return null;
       }
+
       // 3. 发送数据帧
       await connector.write('cmd_send', [1, 0]..addAll(encrypted));
+
       // 4. 等 RCV_OK
       final rcvOk = await _wait(connector, 'cmd_send', timeout: timeout);
       if (rcvOk == null || rcvOk.length < 4 ||
@@ -64,9 +68,8 @@ class EncryptedChannel {
     String channel, {
     required Duration timeout,
   }) async {
-    // TODO: 接入 connector 通知流
-    await Future<void>.delayed(timeout);
-    return null;
+    // 关键修复：使用 connector.waitNotification() 真实订阅 BLE 通知流
+    return connector.waitNotification(channel, timeout: timeout);
   }
 
   /// 发送 MiOT SET 命令（便捷）

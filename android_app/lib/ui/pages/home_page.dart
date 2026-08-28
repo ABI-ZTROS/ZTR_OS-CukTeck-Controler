@@ -3,7 +3,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../ble/android_scanner.dart';
 import '../../ble/android_connector.dart';
+import '../../ble/port_decoder_wiring.dart';
 import '../../ble/port_stream.dart';
+import '../../protocol/authenticator.dart';
 import '../../protocol/constants.dart';
 import '../../protocol/token_service.dart';
 import '../widgets/port_card.dart';
@@ -125,13 +127,43 @@ class _HomePageState extends State<HomePage> {
       return;
     }
     setState(() => _currentStep = 1);
-    // TODO: 接入 Authenticator.authenticate
-    // 认证成功后 setState => _currentStep = 4
-    await Future<void>.delayed(const Duration(seconds: 1));
+
+    // Authenticate
+    final cfg = await _tokenService.getSaved();
+    if (cfg == null || !cfg.isValid) {
+      setState(() {
+        _isConnecting = false;
+        _currentStep = -1;
+        _errorMessage = '未配置 Token，请先导入';
+      });
+      await _connector.disconnect();
+      return;
+    }
+
+    final authed = await Authenticator.instance.authenticate(_connector, cfg.token);
+    if (!authed) {
+      setState(() {
+        _isConnecting = false;
+        _currentStep = -1;
+        _errorMessage = '认证失败：Token 无效或设备无响应';
+      });
+      await _connector.disconnect();
+      return;
+    }
+    setState(() => _currentStep = 4);
+
+    // Wire up port decoder
+    await wirePortDecoder(_connector);
+
     setState(() {
       _isConnecting = false;
       _currentStep = -1;
     });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('连接成功')),
+      );
+    }
   }
 
   @override

@@ -2,7 +2,7 @@ import 'dart:typed_data';
 import 'package:pointycastle/api.dart';
 import 'package:pointycastle/block/aes.dart';
 import 'package:pointycastle/modes/gcm.dart';
-import '../logger/logger.dart';
+import '../utils/logger/logger.dart';
 
 /// AES-CCM 加解密工具（Dart 移植）
 ///
@@ -121,9 +121,9 @@ class CryptoEngine {
   }
 
   /// AES-CCM 解密
-  List<int> _aesCcmDecrypt(List<int> key, List<int> nonce, List<int> cipher) {
-    final cipher = GCMBlockCipher(AesFastEngine());
-    cipher.init(
+  List<int> _aesCcmDecrypt(List<int> key, List<int> nonce, List<int> ciphertext) {
+    final engine = GCMBlockCipher(AesFastEngine());
+    engine.init(
       false,
       AEADParameters(
         KeyParameter(Uint8List.fromList(key)),
@@ -132,7 +132,7 @@ class CryptoEngine {
         Uint8List(0),
       ),
     );
-    return cipher.process(Uint8List.fromList(cipher));
+    return engine.process(Uint8List.fromList(ciphertext));
   }
 
   static String _hex(List<int> data) =>

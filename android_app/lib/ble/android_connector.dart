@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
-import '../logger/logger.dart';
+import '../utils/logger/logger.dart';
 import '../protocol/constants.dart';
 
 /// 连接状态枚举
@@ -13,12 +13,20 @@ enum BleConnectionState {
   error,
 }
 
+/// BLE 通知数据记录
+class BleNotification {
+  const BleNotification(this.channel, this.data);
+  final String channel;
+  final List<int> data;
+}
+
 /// Android BLE 连接器
 ///
 /// 支持：
 ///   - 连接 + MTU 协商
 ///   - 5 个通知通道订阅（顺序对齐参考项目）
 ///   - 5 秒超时 + 3 次重试
+///   - 广播通知流供 Authenticator / EncryptedChannel / PortDecoder 消费
 class AndroidConnector {
   AndroidConnector._();
   static final AndroidConnector instance = AndroidConnector._();
@@ -30,13 +38,17 @@ class AndroidConnector {
   final Map<String, StreamSubscription<List<int>>> _notifySubs =
       <String, StreamSubscription<List<int>>>{};
 
+  /// 广播通知流：所有通道的 BLE 通知都会通过此 Stream 发出
+  final StreamController<BleNotification> _notificationController =
+      StreamController<BleNotification>.broadcast();
+
+  /// 订阅此流以接收所有 BLE 通知
+  Stream<BleNotification> get notifications => _notificationController.stream;
+
   BleConnectionState get state => _state;
   BluetoothDevice? get device => _device;
 
   /// 连接并订阅所有通道
-  ///
-  /// [device] 目标设备
-  /// 返回是否成功
   Future<bool> connect(BluetoothDevice device) async {
     _state = BleConnectionState.connecting;
     AppLogger.instance.i(
@@ -44,7 +56,6 @@ class AndroidConnector {
       'Connecting to ${device.remoteId.str}...',
     );
 
-    // 3 次重试
     for (int attempt = 1; attempt <= bleMaxRetries; attempt++) {
       try {
         if (attempt > 1) {
@@ -58,11 +69,9 @@ class AndroidConnector {
         _state = BleConnectionState.connected;
         AppLogger.instance.i('AndroidConnector', 'Connected');
 
-        // MTU 协商
         final mtu = await device.mtu.first;
         AppLogger.instance.i('AndroidConnector', 'MTU negotiated: $mtu');
 
-        // 订阅通道
         await _subscribeAll();
         _state = BleConnectionState.ready;
         return true;
@@ -86,12 +95,10 @@ class AndroidConnector {
     return false;
   }
 
-  /// 订阅所有 GATT 通道
   Future<void> _subscribeAll() async {
     final dev = _device;
     if (dev == null) throw StateError('Not connected');
 
-    // 发现服务
     final services = await dev.discoverServices();
     final fe95 = services.firstWhere(
       (s) => s.uuid.str == uuidFe95,
@@ -120,6 +127,8 @@ class AndroidConnector {
               'BleNotify:${entry.key}',
               'len=${data.length} hex=${_bytesToHex(data)}',
             );
+            // 关键：转发到广播通知流
+            _notificationController.add(BleNotification(entry.key, data));
           },
           onError: (e, stack) {
             AppLogger.instance.e(
@@ -134,21 +143,42 @@ class AndroidConnector {
     AppLogger.instance.i('AndroidConnector', 'All channels subscribed');
   }
 
-  /// 发送数据
+  /// 等待指定通道的下一个通知，带超时
+  Future<List<int>?> waitNotification(
+    String channel, {
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    final completer = Completer<List<int>?>();
+    late final StreamSubscription<BleNotification> sub;
+    sub = notifications.listen((event) {
+      if (event.channel == channel && !completer.isCompleted) {
+        completer.complete(event.data);
+        sub.cancel();
+      }
+    });
+    try {
+      return await completer.future.timeout(timeout, onTimeout: () {
+        sub.cancel();
+        return null;
+      });
+    } catch (e) {
+      sub.cancel();
+      return null;
+    }
+  }
+
   Future<void> write(String channel, List<int> data) async {
     final char = _characteristics[channel];
     if (char == null) throw StateError('Channel $channel not subscribed');
     await char.write(data, withoutResponse: false);
   }
 
-  /// 读取数据
   Future<List<int>> read(String channel) async {
     final char = _characteristics[channel];
     if (char == null) throw StateError('Channel $channel not subscribed');
     return char.read();
   }
 
-  /// 断开连接
   Future<void> disconnect() async {
     try {
       for (final sub in _notifySubs.values) {
@@ -156,9 +186,7 @@ class AndroidConnector {
       }
       _notifySubs.clear();
       _characteristics.clear();
-      if (_device != null) {
-        await _device!.disconnect();
-      }
+      await _notificationController.close();
     } catch (e, stackTrace) {
       AppLogger.instance.e('AndroidConnector', 'disconnect error: $e');
     } finally {

@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart' hide ScanResult;
-import '../logger/logger.dart';
+import '../utils/logger/logger.dart';
 import '../protocol/constants.dart';
 
 /// 扫描结果
