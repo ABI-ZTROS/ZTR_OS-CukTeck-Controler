@@ -35,9 +35,10 @@ jobs:
         working-directory: android_app
         run: |
           flutter pub get
-          # Universal APK: includes all 4 ABIs for maximum compatibility
-          # armeabi-v7a, arm64-v8a, x86, x86_64
-          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64,android-x64,android-x86
+          # Split-per-abi: 生成每个架构独立的 APK
+          # 支持 armeabi-v7a, arm64-v8a, x86_64
+          # 注: android-x86 (32位) 已在 Flutter 3.x 中弃用
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64,android-x64
           echo "=== Build output ==="
           ls -la build/app/outputs/flutter-apk/
       - uses: actions/upload-artifact@v4
