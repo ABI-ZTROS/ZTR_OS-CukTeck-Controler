@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </base-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">account.xiaomi.com</domain>
+        <domain includeSubdomains="true">api.io.mi.com</domain>
+        <domain includeSubdomains="true">sts.api.io.mi.com</domain>
+        <domain includeSubdomains="true">de.api.io.mi.com</domain>
+        <domain includeSubdomains="true">us.api.io.mi.com</domain>
+        <domain includeSubdomains="true">ru.api.io.mi.com</domain>
+        <domain includeSubdomains="true">tw.api.io.mi.com</domain>
+        <domain includeSubdomains="true">sg.api.io.mi.com</domain>
+        <domain includeSubdomains="true">in.api.io.mi.com</domain>
+        <domain includeSubdomains="true">i2.api.io.mi.com</domain>
+    </domain-config>
+</network-security-config>

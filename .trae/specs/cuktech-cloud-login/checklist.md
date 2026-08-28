@@ -1,0 +1,10 @@
+- [ ] Checkpoint 1: RC4-drop[1024] Dart 实现正确（加密解密可还原原文）
+- [ ] Checkpoint 2: Signed-nonce 和 SHA1 签名逻辑正确
+- [ ] Checkpoint 3: Android WebView 能加载米家登录页并捕获 serviceToken
+- [ ] Checkpoint 4: getBeaconKey API 调用成功返回 32 位十六进制 Token
+- [ ] Checkpoint 5: Token 持久化到 flutter_secure_storage
+- [ ] Checkpoint 6: 所有网络操作包含 5 秒超时 + 3 次重试
+- [ ] Checkpoint 7: C# 端 RC4 实现与 Dart 端一致
+- [ ] Checkpoint 8: Windows WebView2 登录 + beaconKey 获取成功
+- [ ] Checkpoint 9: GitHub Actions 全部通过（Android + Lint + Windows）
+- [ ] Checkpoint 10: 代码按 ble/protocol/ui/utils 目录拆分，单文件 < 300 行

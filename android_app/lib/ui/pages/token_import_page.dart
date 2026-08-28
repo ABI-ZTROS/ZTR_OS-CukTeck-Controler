@@ -3,8 +3,11 @@ import '../../protocol/models.dart';
 import '../../protocol/secure_token_store.dart';
 import '../../protocol/token_service.dart';
 import '../../utils/logger/logger.dart';
+import '../../utils/xiaomi_cloud/cloud_client.dart';
+import '../../utils/xiaomi_cloud/models.dart';
 import '../widgets/manual_token_form.dart';
 import '../widgets/scan_widgets.dart';
+import 'webview_login_page.dart';
 
 /// Token 导入页 —— 扫描米家设备（miio2.db）/ 手动输入 / 云登录
 class TokenImportPage extends StatefulWidget {
@@ -225,15 +228,37 @@ class _TokenImportPageState extends State<TokenImportPage> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               const Text(
-                  '即将跳转到小米账号授权页面，登录后自动同步你的设备列表。',
+                  '即将跳转到小米账号授权页面，登录后自动同步设备列表。',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.grey)),
               const SizedBox(height: 24),
               ElevatedButton(
                 onPressed: () {
-                  // TODO: 接入 qr_login.dart 云端登录流程
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('云登录尚未实现')),
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => WebviewLoginPage(
+                        onLoginSuccess: (serviceToken, ssecurity) async {
+                          // 设置凭据
+                          XiaomiCloudClient.instance.setCredentials(
+                            serviceToken: serviceToken,
+                            ssecurity: ssecurity,
+                          );
+                          // 导航到设备列表选择
+                          final devices =
+                              await XiaomiCloudClient.instance.getDeviceList();
+                          if (mounted && devices.isNotEmpty) {
+                            // 显示设备选择对话框
+                            _showDeviceSelectDialog(devices);
+                          } else if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content:
+                                      Text('未找到设备，请确认账号是否已绑定设备')),
+                            );
+                          }
+                        },
+                      ),
+                    ),
                   );
                 },
                 child: const Text('开始云登录'),
@@ -246,6 +271,95 @@ class _TokenImportPageState extends State<TokenImportPage> {
           ),
         ),
       );
+
+  void _showDeviceSelectDialog(List<CloudDeviceInfo> devices) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('选择设备'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: devices.length,
+            itemBuilder: (context, index) {
+              final dev = devices[index];
+              return ListTile(
+                title: Text(dev.name.isNotEmpty ? dev.name : dev.model),
+                subtitle: Text('${dev.model} · ${dev.did}'),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _selectCloudDevice(dev);
+                },
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _selectCloudDevice(CloudDeviceInfo dev) async {
+    if (_saving) return;
+    setState(() => _saving = true);
+    try {
+      String? beaconKey;
+      String effectiveToken = dev.beaconToken;
+
+      // 优先尝试获取 beaconKey（BLE Token）
+      try {
+        beaconKey = await XiaomiCloudClient.instance.getBeaconKey(dev.did);
+        if (beaconKey != null && beaconKey.isNotEmpty) {
+          effectiveToken = beaconKey;
+          AppLogger.instance.i('TokenImportPage', 'Got beaconKey for ${dev.did}');
+        }
+      } catch (e) {
+        AppLogger.instance
+            .w('TokenImportPage', 'getBeaconKey failed: $e');
+      }
+
+      // 如果 beaconToken 也为空，使用 beaconKey 作为 fallback
+      if (effectiveToken.isEmpty && beaconKey != null) {
+        effectiveToken = beaconKey;
+      }
+
+      if (effectiveToken.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法获取设备 Token，请重试')),
+        );
+        return;
+      }
+
+      final cfg = TokenConfig(
+        token: effectiveToken,
+        key: beaconKey ?? '',
+        did: dev.did,
+        userId: XiaomiCloudClient.instance.userId,
+        deviceMac: dev.mac,
+        deviceName: dev.name,
+        deviceModel: dev.model,
+      );
+
+      await _store.write(cfg);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '已保存设备：${dev.name.isEmpty ? dev.did : dev.name}',
+          ),
+        ),
+      );
+      Navigator.of(context).pop(cfg);
+    } catch (e) {
+      AppLogger.instance
+          .e('TokenImportPage', 'save cloud device failed: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('保存失败: $e')));
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
 
   void _openDowngradeGuide() {
     // TODO: 打开降级米家 App 的说明页或浏览器链接
