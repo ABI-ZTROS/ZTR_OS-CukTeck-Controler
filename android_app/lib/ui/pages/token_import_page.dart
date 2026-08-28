@@ -237,7 +237,7 @@ class _TokenImportPageState extends State<TokenImportPage> {
                   Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (context) => WebviewLoginPage(
-                        onLoginSuccess: (serviceToken, ssecurity) async {
+                        onLoginSuccess: (serviceToken, ssecurity, userId) async {
                           // 设置凭据
                           XiaomiCloudClient.instance.setCredentials(
                             serviceToken: serviceToken,
