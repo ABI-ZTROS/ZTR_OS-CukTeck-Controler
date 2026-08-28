@@ -68,11 +68,11 @@ namespace CukTechController.Protocol
                     WriteIndented = true
                 });
                 await File.WriteAllTextAsync(_settingsPath, json);
-                AppLogger.Instance.Debug("Settings saved");
+                AppLogger.Debug("Settings saved");
             }
             catch (Exception ex)
             {
-                AppLogger.Instance.Error("Failed to save settings", ex);
+                AppLogger.Error("Failed to save settings", ex);
             }
         }
 
@@ -93,12 +93,12 @@ namespace CukTechController.Protocol
                         ScanTimeout = settings.ScanTimeout;
                         RefreshInterval = settings.RefreshInterval;
                     }
-                    AppLogger.Instance.Debug("Settings loaded");
+                    AppLogger.Debug("Settings loaded");
                 }
             }
             catch (Exception ex)
             {
-                AppLogger.Instance.Error("Failed to load settings", ex);
+                AppLogger.Error("Failed to load settings", ex);
             }
         }
     }

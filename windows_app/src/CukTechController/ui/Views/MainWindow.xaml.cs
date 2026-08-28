@@ -25,7 +25,7 @@ namespace CukTechController.Views
                 _vm.OpenSettingsRequested += OnOpenSettingsRequested;
                 _vm.OpenLogRequested += OnOpenLogRequested;
             }
-            AppLogger.Instance.Debug("MainWindow initialized");
+            AppLogger.Debug("MainWindow initialized");
         }
 
         protected override void OnClosed(EventArgs e)

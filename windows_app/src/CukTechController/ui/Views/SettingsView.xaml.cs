@@ -12,7 +12,7 @@ namespace CukTechController.Views
         public SettingsView()
         {
             InitializeComponent();
-            AppLogger.Instance.Debug("SettingsView initialized");
+            AppLogger.Debug("SettingsView initialized");
         }
     }
 }

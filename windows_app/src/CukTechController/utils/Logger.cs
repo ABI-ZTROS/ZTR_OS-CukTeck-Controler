@@ -122,18 +122,11 @@ public class AppLogger
     public void W(string tag, string msg, Exception? ex = null) => Log(LogLevel.Warning, tag, msg, ex);
     public void E(string tag, string msg, Exception? ex = null) => Log(LogLevel.Error, tag, msg, ex);
 
-    // ---- 向后兼容方法（旧 API，无 tag） ----
-
-    public void Debug(string message, Exception? ex = null) => D("App", message, ex);
-    public void Info(string message, Exception? ex = null) => I("App", message, ex);
-    public void Warning(string message, Exception? ex = null) => W("App", message, ex);
-    public void Error(string message, Exception? ex = null) => E("App", message, ex);
-
     // ---- 静态便捷方法（向后兼容） ----
 
     public static void Debug(string message, Exception? ex = null) => Instance.D("App", message, ex);
     public static void Info(string message, Exception? ex = null) => Instance.I("App", message, ex);
-    public static void Warn(string message, Exception? ex = null) => Instance.W("App", message, ex);
+    public static void Warning(string message, Exception? ex = null) => Instance.W("App", message, ex);
     public static void Error(string message, Exception? ex = null) => Instance.E("App", message, ex);
 }
 

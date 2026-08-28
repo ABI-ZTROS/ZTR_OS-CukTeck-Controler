@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using CukTechController.Models;
 using CukTechController.Utils;
 
 namespace CukTechController.Protocol
@@ -58,7 +59,7 @@ namespace CukTechController.Protocol
             }
             catch (Exception ex)
             {
-                AppLogger.Instance.Error("Failed to load token", ex);
+                AppLogger.Error("Failed to load token", ex);
             }
 
             return _cachedToken;
@@ -75,11 +76,11 @@ namespace CukTechController.Protocol
                 var json = JsonSerializer.Serialize(token);
                 var encrypted = Encoding.UTF8.GetBytes(json); // TODO: 加密
                 await File.WriteAllBytesAsync(_tokenPath, encrypted);
-                AppLogger.Instance.Info($"Token saved for user: {token.UserId}");
+                AppLogger.Info($"Token saved for user: {token.UserId}");
             }
             catch (Exception ex)
             {
-                AppLogger.Instance.Error("Failed to save token", ex);
+                AppLogger.Error("Failed to save token", ex);
             }
         }
 
@@ -95,11 +96,11 @@ namespace CukTechController.Protocol
                 {
                     File.Delete(_tokenPath);
                 }
-                AppLogger.Instance.Info("Token cleared");
+                AppLogger.Info("Token cleared");
             }
             catch (Exception ex)
             {
-                AppLogger.Instance.Error("Failed to clear token", ex);
+                AppLogger.Error("Failed to clear token", ex);
             }
         }
 

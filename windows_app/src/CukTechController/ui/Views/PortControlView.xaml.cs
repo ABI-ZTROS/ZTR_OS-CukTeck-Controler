@@ -12,7 +12,7 @@ namespace CukTechController.Views
         public PortControlView()
         {
             InitializeComponent();
-            AppLogger.Instance.Debug("PortControlView initialized");
+            AppLogger.Debug("PortControlView initialized");
         }
     }
 }
