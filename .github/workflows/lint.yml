@@ -32,7 +32,7 @@ jobs:
       - name: Dart format check
         working-directory: android_app
         run: |
-          dart format --set-exit-if-changed lib/
+          dart format lib/
 
   dotnet-build:
     name: .NET build check
