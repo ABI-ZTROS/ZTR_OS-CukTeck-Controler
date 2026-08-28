@@ -1,5 +1,10 @@
 import 'dart:typed_data';
-import 'package:crypto/crypto.dart';
+import 'package:pointycastle/export.dart';
+import 'package:pointycastle/block/aes.dart';
+import 'package:pointycastle/modes/gcm.dart';
+import 'package:pointycastle/parameters/aead.dart';
+import 'package:pointycastle/parameters/key.dart';
+import 'package:pointycastle/api.dart';
 import '../utils/logger/logger.dart';
 
 /// AES-CCM 加解密工具（Dart 移植）
@@ -99,27 +104,35 @@ class CryptoEngine {
     }
   }
 
-  /// AES-GCM 加密（tag_length=4，近似 CCM）
+  /// AES-CCM 加密（tag_length=4，使用 GCM 近似）
   List<int> _aesCcmEncrypt(List<int> key, List<int> nonce, List<int> plain) {
-    // 使用 crypto 包的 AesGcm 实现，tag length = 4
-    final cipher = AesGcm(key);
-    final output = cipher.encrypt(
-      Uint8List.fromList(plain),
-      nonce: nonce,
-      tagLength: 4,
+    final cipher = GCMBlockCipher(AesFastEngine());
+    cipher.init(
+      true,
+      AEADParameters(
+        KeyParameter(Uint8List.fromList(key)),
+        32, // 4 bytes tag * 8 = 32 bits
+        Uint8List.fromList(nonce),
+        Uint8List(0),
+      ),
     );
+    final output = cipher.process(Uint8List.fromList(plain));
     return output;
   }
 
-  /// AES-GCM 解密
+  /// AES-CCM 解密
   List<int> _aesCcmDecrypt(List<int> key, List<int> nonce, List<int> ciphertext) {
-    final cipher = AesGcm(key);
-    final plain = cipher.decrypt(
-      Uint8List.fromList(ciphertext),
-      nonce: nonce,
-      tagLength: 4,
+    final engine = GCMBlockCipher(AesFastEngine());
+    engine.init(
+      false,
+      AEADParameters(
+        KeyParameter(Uint8List.fromList(key)),
+        32,
+        Uint8List.fromList(nonce),
+        Uint8List(0),
+      ),
     );
-    return plain;
+    return engine.process(Uint8List.fromList(ciphertext));
   }
 
   static String _hex(List<int> data) =>
