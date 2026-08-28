@@ -101,18 +101,26 @@ class CryptoEngine {
 
   /// AES-GCM 加密（使用 cryptography 包，输出包含 tag）
   Future<List<int>> _aesCcmEncrypt(List<int> key, List<int> nonce, List<int> plain) async {
-    final cipher = AesGcm(key: SecretKey(Uint8List.fromList(key)));
+    final cipher = AesGcm.with128BitKey(key: SecretKey(Uint8List.fromList(key)));
     final encrypted = await cipher.encrypt(
-      SecretBox(Uint8List.fromList(plain), nonce: Nonce(Uint8List.fromList(nonce))),
+      SecretBox(
+        Uint8List.fromList(plain),
+        nonce: Nonce(Uint8List.fromList(nonce)),
+        mac: Mac.empty,
+      ),
     );
     return encrypted.cipherText; // This includes tag appended
   }
 
   /// AES-GCM 解密
   Future<List<int>> _aesCcmDecrypt(List<int> key, List<int> nonce, List<int> ciphertext) async {
-    final cipher = AesGcm(key: SecretKey(Uint8List.fromList(key)));
+    final cipher = AesGcm.with128BitKey(key: SecretKey(Uint8List.fromList(key)));
     final decrypted = await cipher.decrypt(
-      SecretBox(Uint8List.fromList(ciphertext), nonce: Nonce(Uint8List.fromList(nonce))),
+      SecretBox(
+        Uint8List.fromList(ciphertext),
+        nonce: Nonce(Uint8List.fromList(nonce)),
+        mac: Mac.empty,
+      ),
     );
     return decrypted.cipherText;
   }
