@@ -45,7 +45,7 @@ public partial class App : Application
         try
         {
             // 加载设置
-            await SettingsService.Instance.LoadAsync();
+            await Settings.Instance.LoadAsync();
 
             // 初始化其他服务
             // TODO: 初始化 BLE 管理器等

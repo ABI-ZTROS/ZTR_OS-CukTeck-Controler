@@ -94,7 +94,7 @@ namespace CukTechController.Views
                 }
 
                 LogTextBox.Text = sb.Length > 0 ? sb.ToString() : "暂无日志内容";
-                LogTextBox.SearchStart = LogTextBox.Text.Length; // scroll to end
+                LogTextBox.ScrollToEnd(); // scroll to end
                 StatusTextBlock.Text = $"已加载 {files.Count()} 个日志文件";
             }
             catch (Exception ex)
@@ -114,7 +114,7 @@ namespace CukTechController.Views
                     return;
                 }
                 LogTextBox.AppendText(line + Environment.NewLine);
-                LogTextBox.SearchStart = LogTextBox.Text.Length;
+                LogTextBox.ScrollToEnd();
             }
             catch { }
         }

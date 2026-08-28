@@ -120,7 +120,7 @@ namespace CukTechController.Protocol
         private byte[] AesCcmEncrypt(byte[] key, byte[] nonce, byte[] plain)
         {
             // TODO: 严格意义上的 CCM 需手写；当前使用 AesGcm(tagLength=4) 近似
-            using var aes = new AesGcm(key, tagLength: 4);
+            using var aes = new AesGcm(key);
             byte[] cipher = new byte[plain.Length];
             byte[] tag = new byte[4];
             aes.Encrypt(nonce, plain, cipher, tag);
@@ -137,7 +137,7 @@ namespace CukTechController.Protocol
         /// </summary>
         private byte[] AesCcmDecrypt(byte[] key, byte[] nonce, byte[] cipher)
         {
-            using var aes = new AesGcm(key, tagLength: 4);
+            using var aes = new AesGcm(key);
 
             // 最后 4 字节是 tag
             byte[] cipherText = cipher.SkipLast(4).ToArray();

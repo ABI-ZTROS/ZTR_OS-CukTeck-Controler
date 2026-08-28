@@ -54,12 +54,12 @@ namespace CukTechController.Ble
                 }
                 catch (Exception ex)
                 {
-                    AppLogger.Error("PortDecoderWiring", $"Decode error: {ex.Message}", ex);
+                    AppLogger.Error($"PortDecoderWiring: Decode error: {ex.Message}", ex);
                 }
             };
 
             connector.ValueReceived += _handler;
-            AppLogger.Info("PortDecoderWiring", "Port decoder wired up on cmd_recv");
+            AppLogger.Info("PortDecoderWiring: Port decoder wired up on cmd_recv");
         }
 
         /// <summary>
@@ -71,7 +71,7 @@ namespace CukTechController.Ble
             {
                 connector.ValueReceived -= _handler;
                 _handler = null;
-                AppLogger.Info("PortDecoderWiring", "Port decoder torn down");
+                AppLogger.Info("PortDecoderWiring: Port decoder torn down");
             }
         }
     }

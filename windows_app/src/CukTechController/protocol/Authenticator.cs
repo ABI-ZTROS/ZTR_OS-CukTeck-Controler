@@ -273,8 +273,37 @@ namespace CukTechController.Protocol
 
         private static byte[] HkdfSha256(byte[] ikm, byte[] salt, int length)
         {
-            using var hkdf = HKDF.Create();
-            return hkdf.Expand(ikm, length, salt, HashAlgorithmName.SHA256);
+            // HKDF-SHA256 manual implementation
+            // Step 1: Extract PRK = HMAC-SHA256(salt, ikm)
+            using (var hmac = new HMACSHA256(salt))
+            {
+                var prk = hmac.ComputeHash(ikm);
+                
+                // Step 2: Expand
+                var result = new byte[length];
+                byte[] t = Array.Empty<byte>();
+                int offset = 0;
+                byte counter = 1;
+                
+                using (var expandHmac = new HMACSHA256(prk))
+                {
+                    while (offset < length)
+                    {
+                        // T(i) = HMAC-SHA256(PRK, T(i-1) || counter)
+                        var input = new byte[t.Length + 1];
+                        Array.Copy(t, 0, input, 0, t.Length);
+                        input[t.Length] = counter;
+                        t = expandHmac.ComputeHash(input);
+                        
+                        int copyLen = Math.Min(t.Length, length - offset);
+                        Array.Copy(t, 0, result, offset, copyLen);
+                        offset += copyLen;
+                        counter++;
+                    }
+                }
+                
+                return result;
+            }
         }
 
         private static byte[] HmacSha256(byte[] key, byte[] data)
