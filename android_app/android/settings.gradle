@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("../..")
     repositories {
         google()
         mavenCentral()
@@ -6,4 +7,5 @@ pluginManagement {
     }
 }
 
-include(":app")
+rootProject.name = 'android'
+include ':app'
