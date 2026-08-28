@@ -87,19 +87,23 @@ class WebviewLoginController {
   Future<void> _extractCookies(InAppWebViewController webController, String url) async {
     try {
       // 方法1: CookieManager (可读取 httpOnly cookies)
-      final uri = WebUri(url);
-      final cookies = await CookieManager.instance.getCookies(url: uri);
+      // flutter_inappwebview 6.x 中 CookieManager.instance 的静态类型推断为 Function，
+      // 通过 dynamic 强制转换绕过静态分析
+      final cookies = await (CookieManager.instance as dynamic)
+          .getCookies(url: WebUri(url)) as List<dynamic>;
       for (final cookie in cookies) {
-        if (cookie.name == 'serviceToken' && serviceToken == null) {
-          serviceToken = cookie.value;
+        final name = cookie.name as String? ?? '';
+        final value = cookie.value as String? ?? '';
+        if (name == 'serviceToken' && serviceToken == null) {
+          serviceToken = value;
           AppLogger.instance.d('WebviewLogin', 'Found serviceToken via CookieManager');
         }
-        if (cookie.name == 'ssecurity' && ssecurity == null) {
-          ssecurity = cookie.value;
+        if (name == 'ssecurity' && ssecurity == null) {
+          ssecurity = value;
           AppLogger.instance.d('WebviewLogin', 'Found ssecurity via CookieManager');
         }
-        if (cookie.name == 'userId' && userId == null) {
-          userId = cookie.value;
+        if (name == 'userId' && userId == null) {
+          userId = value;
         }
       }
 
