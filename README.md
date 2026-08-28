@@ -68,4 +68,4 @@ dart format android_app/lib
 
 ## 授权协议
 
-MIT.
+本软件不隶属于任何开源协议😅你们就梦吧😅
