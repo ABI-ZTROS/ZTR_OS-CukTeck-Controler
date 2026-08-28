@@ -13,13 +13,16 @@ dependencies:
   flutter_blue_plus: ^1.32.0
   flutter_secure_storage: ^9.0.0
   shared_preferences: ^2.2.2
-  pointycastle: ^1.0.1
+  pointycastle: ^3.0.0
   cryptography: ^2.7.0
-  crypto: ^3.0.3
+  crypto: ^3.0.6
   hex: ^0.2.0
   http: ^1.1.0
   path_provider: ^2.1.4
   intl: ^0.19.0
+
+  # Native Root bridge
+  plugin_platform_interface: ^2.1.0
 
 dev_dependencies:
   flutter_test:
