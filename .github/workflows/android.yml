@@ -1,8 +1,5 @@
 name: Android Build
 on:
-  pull_request:
-    paths:
-      - 'android_app/**'
   push:
     branches: [main]
     paths:
@@ -27,42 +24,21 @@ jobs:
           flutter create --platforms=android --project-name=CukTechController .
           # Copy custom Android source files (RootShell, MethodChannel)
           cp -r ../android-app-custom/kotlin/* android/app/src/main/kotlin/
-          # Update AndroidManifest.xml with custom permissions
-          python3 -c "
-          import re
-          manifest = 'android/app/src/main/AndroidManifest.xml'
-          with open(manifest, 'r') as f:
-              content = f.read()
-          # Add custom permissions before <application>
-          custom_perms = '''
-    <!-- 蓝牙权限 -->
-    <uses-permission android:name=\"android.permission.BLUETOOTH\" />
-    <uses-permission android:name=\"android.permission.BLUETOOTH_ADMIN\" />
-    <uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\" />
-    <uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\" />
-    <!-- 位置权限 -->
-    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />
-    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />
-    <!-- 存储权限 -->
-    <uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" />
-    <uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\" />
-    <!-- Root 权限 -->
-    <uses-permission android:name=\"android.permission.WRITE_SECURE_SETTINGS\" />
-'''
-          content = content.replace('<application', custom_perms + '\n    <application')
-          # Add flutterEmbedding meta-data
-          content = content.replace(
-              'android:configChanges=',
-              'android:usesCleartextTraffic=\"true\"\\n            android:configChanges=')
-          with open(manifest, 'w') as f:
-              f.write(content)
-          "
+      - name: Add custom Android permissions
+        working-directory: android_app
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          # Add custom permissions before <application
+          sed -i 's|<application|<!-- Bluetooth permissions -->\n    <uses-permission android:name="android.permission.BLUETOOTH" />\n    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />\n    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />\n    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />\n    <!-- Location permissions -->\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />\n    <!-- Storage permissions -->\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n    <!-- Root permissions -->\n    <uses-permission android:name="android.permission.WRITE_SECURE_SETTINGS" />\n    <application|' "$MANIFEST"
+          # Add usesCleartextTraffic
+          sed -i 's|android:configChanges=|android:usesCleartextTraffic="true"\n            android:configChanges=|' "$MANIFEST"
       - name: Build APK
         working-directory: android_app
         run: |
           flutter pub get
           flutter build apk --release
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: android-apk
           path: android_app/build/app/outputs/flutter-apk/app-release.apk

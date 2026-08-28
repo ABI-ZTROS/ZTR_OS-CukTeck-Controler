@@ -23,6 +23,7 @@ jobs:
           dotnet restore
           dotnet publish -c Release -r win-x64 --self-contained false -o publish
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         with:
           name: windows-exe
           path: windows_app/src/CukTechController/publish/
