@@ -9,10 +9,8 @@
     <AssemblyName>CukTechController</AssemblyName>
     <RootNamespace>CukTechController</RootNamespace>
     <Version>0.1.0</Version>
-    <!-- NativeAOT: AOT compile + self-contained runtime -->
-    <PublishAot>true</PublishAot>
-    <EnableAotAnalyzers>true</EnableAotAnalyzers>
-    <InvariantGlobalization>false</InvariantGlobalization>
+    <!-- 注意: NativeAOT 与 WPF 不兼容 (WPF 大量依赖反射)
+         发布时使用 dotnet publish --self-contained true 即可生成自包含部署 -->
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

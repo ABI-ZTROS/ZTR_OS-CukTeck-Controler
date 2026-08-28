@@ -48,11 +48,11 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Build NativeAOT self-contained
+      - name: Build self-contained
         working-directory: windows_app/src/CukTechController
         run: |
           dotnet restore
-          dotnet publish -c Release -r win-x64 --self-contained true /p:PublishAot=true -o publish
+          dotnet publish -c Release -r win-x64 --self-contained true -o publish
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.WINDOWS_ARTIFACT }}

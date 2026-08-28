@@ -17,13 +17,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Build NativeAOT self-contained
+      - name: Build self-contained
         working-directory: windows_app/src/CukTechController
         run: |
           dotnet restore
-          # Self-contained NativeAOT: single exe, no runtime dependency
-          # Includes .NET runtime + AOT-compiled IL
-          dotnet publish -c Release -r win-x64 --self-contained true /p:PublishAot=true -o publish
+          # Self-contained: 包含 .NET 运行时 + WPF，无需用户安装 .NET
+          # 注意: WPF 不支持 NativeAOT，使用 JIT 编译的自包含部署
+          dotnet publish -c Release -r win-x64 --self-contained true -o publish
           echo "=== Build output ==="
           ls -la publish/
       - uses: actions/upload-artifact@v4
