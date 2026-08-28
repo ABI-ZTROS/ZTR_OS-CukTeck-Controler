@@ -23,7 +23,7 @@ jobs:
         run: |
           flutter create --platforms=android --project-name=cuktech_controller .
           # Copy custom Android source files (RootShell, MethodChannel)
-          cp -r ../android-app-custom/kotlin/* android/app/src/main/kotlin/
+          cp -r android-app-custom/kotlin/* android/app/src/main/kotlin/
       - name: Add custom Android permissions
         working-directory: android_app
         run: |
