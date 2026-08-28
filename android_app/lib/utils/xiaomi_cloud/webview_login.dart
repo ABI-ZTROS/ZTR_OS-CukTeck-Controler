@@ -9,7 +9,7 @@ import '../logger/logger.dart';
 /// 1. 打开 https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true
 /// 2. 用户完成登录后，WebView 重定向到 sts.api.io.mi.com
 /// 3. 从重定向 URL 的参数中提取 serviceToken
-/// 4. 从 WebView cookies 中提取 ssecurity
+/// 4. 通过 JavaScript 注入获取 ssecurity cookie
 class WebviewLoginController {
   final StreamController<LoginEvent> _controller = StreamController.broadcast();
 
@@ -32,29 +32,37 @@ class WebviewLoginController {
     _controller.add(LoginEvent.success(serviceToken!, ssecurity!));
   }
 
-  /// 从 cookies 中提取凭据 (通过 InAppWebViewController)
-  Future<void> _extractCookies(InAppWebViewController webController) async {
+  /// 尝试从当前页面获取 cookies (通过 JavaScript)
+  Future<void> _extractCookiesViaJS(InAppWebViewController webController) async {
     try {
-      final cookies = await webController.getCookies();
-      for (final cookie in cookies) {
-        if (cookie.name == 'serviceToken' && serviceToken == null) {
-          serviceToken = cookie.value;
-          AppLogger.instance.d('WebviewLogin', 'Found serviceToken');
-        }
-        if (cookie.name == 'ssecurity' && ssecurity == null) {
-          ssecurity = cookie.value;
-          AppLogger.instance.d('WebviewLogin', 'Found ssecurity');
-        }
-        if (cookie.name == 'userId' && userId == null) {
-          userId = cookie.value;
+      final result = await webController.evaluateJavascript(source: 'document.cookie');
+      if (result != null && result.isNotEmpty) {
+        final cookiesStr = result as String;
+        final pairs = cookiesStr.split(';');
+        for (final pair in pairs) {
+          final parts = pair.trim().split('=');
+          if (parts.length >= 2) {
+            final name = parts[0];
+            final value = parts.sublist(1).join('=');
+            if (name == 'serviceToken' && serviceToken == null) {
+              serviceToken = value;
+              AppLogger.instance.d('WebviewLogin', 'Found serviceToken via JS');
+            }
+            if (name == 'ssecurity' && ssecurity == null) {
+              ssecurity = value;
+              AppLogger.instance.d('WebviewLogin', 'Found ssecurity via JS');
+            }
+            if (name == 'userId' && userId == null) {
+              userId = value;
+            }
+          }
         }
       }
-      // 成功条件：同时拥有 serviceToken 和 ssecurity
       if (serviceToken != null && ssecurity != null) {
         _emitSuccess();
       }
     } catch (e) {
-      AppLogger.instance.w('WebviewLogin', 'Cookie extraction failed: $e');
+      AppLogger.instance.w('WebviewLogin', 'JS cookie extraction failed: $e');
     }
   }
 
@@ -70,17 +78,68 @@ class WebviewLoginController {
         final params = action.request.url!.queryParameters;
         if (params.containsKey('serviceToken')) {
           serviceToken = params['serviceToken'];
+          AppLogger.instance.d('WebviewLogin', 'Found serviceToken in URL');
+        }
+        // 检查 fragment (# 后面的参数)
+        final fragment = action.request.url!.fragment;
+        if (fragment.isNotEmpty) {
+          final uri = Uri.parse('https://dummy.com?$fragment');
+          if (uri.queryParameters.containsKey('serviceToken') && serviceToken == null) {
+            serviceToken = uri.queryParameters['serviceToken'];
+          }
+          if (uri.queryParameters.containsKey('ssecurity') && ssecurity == null) {
+            ssecurity = uri.queryParameters['ssecurity'];
+          }
         }
       }
+    }
+
+    // 检测 account.xiaomi.com 登录页 → 可能包含 ssecurity
+    if (url.contains('account.xiaomi.com')) {
+      if (action.request.url != null) {
+        final params = action.request.url!.queryParameters;
+        if (params.containsKey('ssecurity') && ssecurity == null) {
+          ssecurity = params['ssecurity'];
+        }
+      }
+    }
+
+    // 检查是否已满足登录条件
+    if (serviceToken != null && ssecurity != null) {
+      _emitSuccess();
     }
 
     return NavigationActionPolicy.ALLOW;
   }
 
-  /// 页面加载完成后提取 cookies
+  /// 页面加载完成后提取凭据
   Future<void> onLoadStop(InAppWebViewController webController, String url) async {
     AppLogger.instance.d('WebviewLogin', 'Page loaded: $url');
-    await _extractCookies(webController);
+
+    // 方法1: 从 URL 参数提取
+    if (url.contains('sts.api.io.mi.com')) {
+      final uri = Uri.parse(url);
+      if (uri.queryParameters.containsKey('serviceToken') && serviceToken == null) {
+        serviceToken = uri.queryParameters['serviceToken'];
+      }
+      final fragment = uri.fragment;
+      if (fragment.isNotEmpty) {
+        final fragUri = Uri.parse('https://dummy.com?$fragment');
+        if (fragUri.queryParameters.containsKey('serviceToken') && serviceToken == null) {
+          serviceToken = fragUri.queryParameters['serviceToken'];
+        }
+        if (fragUri.queryParameters.containsKey('ssecurity') && ssecurity == null) {
+          ssecurity = fragUri.queryParameters['ssecurity'];
+        }
+      }
+    }
+
+    // 方法2: 通过 JavaScript 获取 cookies
+    await _extractCookiesViaJS(webController);
+
+    if (serviceToken != null && ssecurity != null) {
+      _emitSuccess();
+    }
   }
 
   void dispose() {

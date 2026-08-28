@@ -79,7 +79,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
               useShouldOverrideUrlLoading: true,
               mediaPlaybackRequiresUserGesture: false,
               clearCache: true,
-              clearSharedData: true,
             ),
             onWebViewCreated: (controller) {
               _webController = controller;
