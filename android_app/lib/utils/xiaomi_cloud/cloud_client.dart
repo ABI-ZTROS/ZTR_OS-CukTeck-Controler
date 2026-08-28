@@ -89,7 +89,6 @@ class XiaomiCloudClient {
 
     final cookies = <String, String>{
       'userId': _userId,
-      'yetAnotherServiceToken': _serviceToken,
       'serviceToken': _serviceToken,
       'locale': 'en_GB',
       'timezone': 'GMT+08:00',

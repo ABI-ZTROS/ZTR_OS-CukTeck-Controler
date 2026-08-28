@@ -1,252 +1,377 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'dart:math';
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import '../logger/logger.dart';
 
-/// WebView 登录控制器
+/// 米家云登录控制器 —— 纯 HTTP 实现
 ///
-/// 米家云登录完整流程（参照 xiaomi_cloud.py）：
-/// 1. HTTP GET serviceLogin?sid=xiaomiio&_json=true → JSON 响应
-/// 2. 解析 JSON 获取 location URL（含 _sign, serviceParam, callback）
-/// 3. WebView 加载 location URL → 显示登录表单
-/// 4. 用户完成登录 → 重定向到 callback (sts.api.io.mi.com)
-/// 5. 从 callback URL 参数和 cookies 中提取 serviceToken + ssecurity
-class WebviewLoginController {
+/// 完整登录流程（严格参照 xiaomi_cloud.py + 实测验证）：
+///
+/// [密码登录]
+///   1. serviceLogin?sid=xiaomiio&_json=true → 获取 _sign, nonce, location
+///   2. serviceLoginAuth2（MD5(password).toUpperCase() 作为 hash）：
+///      → code=0, secStatus=0 → 直接成功！拿 ssecurity + location
+///      → code=0, secStatus=16 → 需要 2FA！走下面流程
+///
+/// [2FA 流程]（secStatus=16 时）
+///   3. identity/list → 确定验证方式（flag=4 手机, flag=8 邮箱）
+///   4. identity/auth/verifyPhone → 触发验证
+///   5. identity/auth/sendPhoneTicket → 发送短信验证码
+///   6. 用户输入验证码
+///   7. POST identity/auth/verifyPhone（ticket=验证码） → 2FA 通过
+///   8. 重新 serviceLoginAuth2（fresh _sign + 密码 hash）→ 拿 ssecurity
+///
+/// [完成登录]
+///   9. 跟随 location URL（加 clientSign）→ 获取 serviceToken
+///  10. ssecurity + serviceToken → API 全通！
+///
+/// 根因说明：
+///   serviceLogin（未登录）→ 返回 psecurity（部分令牌）→ 签名失败！
+///   serviceLoginAuth2（已认证）→ 返回 ssecurity（完整令牌）→ 签名正确！
+///   2FA 通过后必须重新调 serviceLoginAuth2（带密码 hash）才能拿 ssecurity！
+class XiaomiLoginController {
   final StreamController<LoginEvent> _controller = StreamController.broadcast();
   final http.Client _httpClient = http.Client();
 
   Stream<LoginEvent> get events => _controller.stream;
 
+  String _username = '';
+  String _passwordHash = ''; // MD5(password).toUpperCase()
+  String _agent = '';
+  String _deviceId = '';
+
   String? serviceToken;
   String? ssecurity;
   String? userId;
-  String? location;
+  String? passToken;
   bool _successReported = false;
+
+  String? _context; // 2FA context
 
   bool get isLoggedIn => serviceToken != null && ssecurity != null;
 
-  /// 通知登录成功（只触发一次）
+  XiaomiLoginController() {
+    final rand = Random.secure();
+    final suffix1 = String.fromCharCodes(
+      List.generate(11, (_) => rand.nextInt(26) + 65),
+    );
+    final suffix2 = String.fromCharCodes(
+      List.generate(6, (_) => rand.nextInt(26) + 65),
+    );
+    _agent = 'Android-7.1.1-1.0.0-ONEPLUS A3010-136-$suffix1 MIIO/$suffix2';
+    _deviceId = '${String.fromCharCodes(List.generate(16, (_) {
+      final c = rand.nextInt(36);
+      return c < 10 ? c + 48 : c - 10 + 97; // 0-9a-z
+    }))}';
+  }
+
+  /// 从响应体中解析小米 JSON
+  Map<String, dynamic> _parseXiaomiJson(String body) {
+    var text = body;
+    if (text.startsWith('&&&START&&&')) {
+      text = text.substring('&&&START&&&'.length);
+    }
+    if (text.endsWith('&&&END&&&')) {
+      text = text.substring(0, text.length - '&&&END&&&'.length);
+    }
+    return jsonDecode(text) as Map<String, dynamic>;
+  }
+
+  /// 计算密码 hash：MD5(password).toUpperCase()
+  static String _hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    final digest = md5.convert(bytes);
+    return digest.toString().toUpperCase();
+  }
+
+  /// 设置 cookies 到 http.Client
+  void _setCookies(Map<String, String> cookies) {
+    final buffer = StringBuffer();
+    cookies.forEach((k, v) {
+      if (v.isNotEmpty) {
+        if (buffer.isNotEmpty) buffer.write('; ');
+        buffer.write('$k=$v');
+      }
+    });
+    _httpClient.send(http.Request('GET', Uri.parse('https://account.xiaomi.com'))
+      ..headers['Cookie'] = buffer.toString());
+  }
+
+  /// 把 response 的 Set-Cookie 头提取为 Map
+  Map<String, String> _extractSetCookies(http.Response response) {
+    final result = <String, String>{};
+    final headers = response.headers['set-cookie'] ?? <String>[];
+    for (final hdr in headers) {
+      final match = RegExp(r'^([^=]+)=([^;]+)').firstMatch(hdr);
+      if (match != null) {
+        result[match.group(1)!] = match.group(2)!;
+      }
+    }
+    return result;
+  }
+
+  /// 合并 cookies（保留已有 + 添加新的）
+  final Map<String, String> _sessionCookies = {};
+
+  Future<http.Response> _get(String url, {Map<String, String>? params}) async {
+    final uri = Uri.parse(url).replace(queryParameters: params);
+    final headers = <String, String>{'User-Agent': _agent};
+    if (_sessionCookies.isNotEmpty) {
+      headers['Cookie'] = _sessionCookies.entries
+          .map((e) => '${e.key}=${e.value}')
+          .join('; ');
+    }
+    final resp = await _httpClient.get(uri, headers: headers);
+    _sessionCookies.addAll(_extractSetCookies(resp));
+    return resp;
+  }
+
+  Future<http.Response> _post(String url, {Map<String, String>? params}) async {
+    final uri = Uri.parse(url);
+    final headers = <String, String>{
+      'User-Agent': _agent,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    };
+    if (_sessionCookies.isNotEmpty) {
+      headers['Cookie'] = _sessionCookies.entries
+          .map((e) => '${e.key}=${e.value}')
+          .join('; ');
+    }
+    final body = params?.entries
+        .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&') ?? '';
+    final resp = await _httpClient.post(uri, headers: headers, body: body);
+    _sessionCookies.addAll(_extractSetCookies(resp));
+    return resp;
+  }
+
+  /// 开始登录流程
+  Future<void> login({required String username, required String password}) async {
+    _username = username;
+    _passwordHash = _hashPassword(password);
+    _successReported = false;
+    _controller.add(LoginEvent.loading('正在初始化...'));
+
+    try {
+      // Step 1: serviceLogin → 获取 _sign
+      AppLogger.instance.i('XiaomiLogin', 'Step 1: serviceLogin');
+      _sessionCookies['deviceId'] = _deviceId;
+      final r1 = await _get('https://account.xiaomi.com/pass/serviceLogin',
+          params: {'sid': 'xiaomiio', '_json': 'true'});
+      final d1 = _parseXiaomiJson(r1.body);
+      final sign = d1['_sign'] as String;
+      final nonce = d1['nonce'] as String? ?? '';
+      AppLogger.instance.d('XiaomiLogin', 'Got _sign, nonce=$nonce');
+
+      // Step 2: serviceLoginAuth2 → 密码登录
+      _controller.add(LoginEvent.loading('正在验证密码...'));
+      AppLogger.instance.i('XiaomiLogin', 'Step 2: serviceLoginAuth2');
+
+      final r2 = await _post('https://account.xiaomi.com/pass/serviceLoginAuth2',
+          params: {
+            'sid': 'xiaomiio',
+            'hash': _passwordHash,
+            'callback': 'https://sts.api.io.mi.com/sts',
+            'qs': '%3Fsid%3Dxiaomiio%26_json%3Dtrue',
+            'user': username,
+            '_sign': sign,
+            '_json': 'true',
+            'cc': '+86',
+          });
+      final d2 = _parseXiaomiJson(r2.body);
+      final secStatus = d2['securityStatus'] ?? d2['secStatus'] ?? 0;
+      AppLogger.instance.i('XiaomiLogin',
+          'Auth2: code=${d2['code']}, secStatus=$secStatus, hasSsecurity=${d2.containsKey('ssecurity')}');
+
+      if (d2['code'] != 0) {
+        _controller.add(LoginEvent.error(
+            d2['desc'] ?? d2['message'] ?? '登录失败'));
+        return;
+      }
+
+      if (secStatus == 0 && d2.containsKey('ssecurity')) {
+        // ✅ 无需 2FA，直接成功！
+        await _completeLogin(d2['ssecurity'] as String, d2['location'] as String,
+            d2['userId']?.toString() ?? '', nonce);
+        return;
+      }
+
+      // secStatus == 16 → 需要 2FA
+      if (secStatus == 16 || secStatus == null) {
+        await _handle2FA(d2);
+        return;
+      }
+
+      _controller.add(LoginEvent.error('未知登录状态'));
+    } catch (e, stackTrace) {
+      AppLogger.instance.e('XiaomiLogin', 'Login error: $e', stackTrace);
+      _controller.add(LoginEvent.error('网络错误: $e'));
+    }
+  }
+
+  /// 处理 2FA 流程
+  Future<void> _handle2FA(Map<String, dynamic> d2) async {
+    final notifUrl = d2['notificationUrl'] as String;
+    final uri = Uri.parse(notifUrl);
+    final context = uri.queryParameters['context'] ?? '';
+    _context = context;
+
+    AppLogger.instance.i('XiaomiLogin', 'Need 2FA, context=${context.substring(0, 40)}...');
+
+    // Step 3: Open authStart
+    await _get(notifUrl);
+
+    // Step 4: identity/list → 确定验证方式
+    final r4 = await _get('https://account.xiaomi.com/identity/list', params: {
+      'sid': 'xiaomiio',
+      'supportedMask': '0',
+      '_locale': 'zh_CN',
+      'context': context,
+    });
+    final d4 = _parseXiaomiJson(r4.body);
+    final flag = d4['flag'] ?? 4;
+    final maskedPhone = d4['maskedPhone'] as String? ?? '';
+    AppLogger.instance.i('XiaomiLogin', '2FA method flag=$flag, phone=$maskedPhone');
+
+    // Step 5: verifyPhone
+    await _get('https://account.xiaomi.com/identity/auth/verifyPhone',
+        params: {'_flag': '$flag', '_json': 'true'});
+
+    // Step 6: sendPhoneTicket → 发送短信
+    final r6 = await _post('https://account.xiaomi.com/identity/auth/sendPhoneTicket',
+        params: {'retry': '0', 'icode': '', '_json': 'true'});
+    final d6 = _parseXiaomiJson(r6.body);
+    final wt = d6['data']?['wt'] as int? ?? 0;
+
+    if (d6['code'] != 0) {
+      _controller.add(LoginEvent.error('发送验证码失败: ${d6['desc'] ?? d6['message']}'));
+      return;
+    }
+
+    // 通知 UI 显示验证码输入框
+    _controller.add(LoginEvent.needCode(maskedPhone, wt));
+    AppLogger.instance.i('XiaomiLogin', 'SMS sent! wt=${wt}s');
+  }
+
+  /// 用户输入验证码后调用
+  Future<void> submitCode(String code) async {
+    if (_context == null) {
+      _controller.add(LoginEvent.error('没有待处理的 2FA 请求'));
+      return;
+    }
+
+    try {
+      _controller.add(LoginEvent.loading('正在验证验证码...'));
+
+      // Step 7: POST verifyPhone → 提交验证码
+      final r7 = await _post('https://account.xiaomi.com/identity/auth/verifyPhone',
+          params: {
+            '_flag': '4',
+            'ticket': code,
+            'trust': 'false',
+            '_json': 'true',
+            '_dc': DateTime.now().millisecondsSinceEpoch.toString(),
+          });
+      final d7 = _parseXiaomiJson(r7.body);
+      AppLogger.instance.i('XiaomiLogin', 'Submit code: code=${d7['code']}, hasLoc=${d7.containsKey('location')}');
+
+      if (d7['code'] != 0 || !d7.containsKey('location')) {
+        _controller.add(LoginEvent.error('验证码错误'));
+        return;
+      }
+
+      // Step 8: Follow location
+      var location = d7['location'] as String;
+      if (!location.startsWith('http')) {
+        location = 'https://account.xiaomi.com$location';
+      }
+      await _get(location);
+
+      // Step 9: serviceLogin → fresh _sign + nonce
+      final r9 = await _get('https://account.xiaomi.com/pass/serviceLogin',
+          params: {'sid': 'xiaomiio', '_json': 'true'});
+      final d9 = _parseXiaomiJson(r9.body);
+      final sign = d9['_sign'] as String;
+      final nonce = d9['nonce'] as String? ?? '';
+
+      // Step 10: 关键！重新调 serviceLoginAuth2（带密码 hash）→ 拿 ssecurity
+      _controller.add(LoginEvent.loading('正在完成登录...'));
+      final r10 = await _post('https://account.xiaomi.com/pass/serviceLoginAuth2',
+          params: {
+            'sid': 'xiaomiio',
+            'hash': _passwordHash,
+            'callback': 'https://sts.api.io.mi.com/sts',
+            'qs': '%3Fsid%3Dxiaomiio%26_json%3Dtrue',
+            'user': _username,
+            '_sign': sign,
+            '_json': 'true',
+            'cc': '+86',
+          });
+      final d10 = _parseXiaomiJson(r10.body);
+      AppLogger.instance.i('XiaomiLogin',
+          'Auth2 (after OTP): code=${d10['code']}, secStatus=${d10['securityStatus']}, hasSsec=${d10.containsKey('ssecurity')}');
+
+      if (d10.containsKey('ssecurity')) {
+        await _completeLogin(
+            d10['ssecurity'] as String,
+            d10['location'] as String,
+            d10['userId']?.toString() ?? '',
+            nonce,
+        );
+      } else {
+        _controller.add(LoginEvent.error('无法获取登录凭据，请重试'));
+      }
+      _context = null;
+    } catch (e, stackTrace) {
+      AppLogger.instance.e('XiaomiLogin', 'Submit code error: $e', stackTrace);
+      _controller.add(LoginEvent.error('验证失败: $e'));
+    }
+  }
+
+  /// 完成登录 → 获取 serviceToken → 通知成功
+  Future<void> _completeLogin(String ssecurity, String location, String userId, String nonce) async {
+    AppLogger.instance.i('XiaomiLogin', 'Completing login: ssec=${ssecurity.substring(0, 8)}...');
+
+    // Follow location URL to get serviceToken
+    final nsec = 'nonce=$nonce&$ssecurity';
+    final clientSign = base64.encode(sha1.convert(utf8.encode(nsec)).bytes);
+    final fullLocation = '$location&clientSign=${Uri.encodeQueryComponent(clientSign)}';
+
+    final r = await _get(fullLocation);
+
+    // serviceToken 应该在 cookies 里
+    serviceToken = _sessionCookies['serviceToken'];
+    this.ssecurity = ssecurity;
+    this.userId = userId;
+
+    if (serviceToken == null) {
+      // fallback: try response JSON
+      final body = r.body;
+      if (body.startsWith('&&&START&&&')) {
+        try {
+          final j = jsonDecode(body.substring(11));
+          serviceToken = j['serviceToken'] as String?;
+        } catch (_) {}
+      }
+    }
+
+    if (serviceToken == null) {
+      AppLogger.instance.e('XiaomiLogin', 'No serviceToken in cookies: ${_sessionCookies.keys}');
+      _controller.add(LoginEvent.error('无法获取 serviceToken'));
+      return;
+    }
+
+    _emitSuccess();
+  }
+
   void _emitSuccess() {
     if (_successReported) return;
-    if (serviceToken == null || ssecurity == null) return;
     _successReported = true;
-    AppLogger.instance
-        .i('WebviewLogin', 'Login success: serviceToken=${serviceToken!.substring(0, 8)}...');
-    _controller.add(LoginEvent.success(serviceToken!, ssecurity!));
-  }
-
-  /// 第一步：获取登录 URL
-  /// 返回需要在 WebView 中加载的 location URL
-  Future<String?> fetchLoginUrl() async {
-    try {
-      final response = await _httpClient.get(
-        Uri.parse('https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true'),
-        headers: {
-          'User-Agent': 'Android-7.1.1-1.0.0-ONEPLUS A3010-136 MIIO/',
-          'Accept': 'application/json',
-        },
-      ).timeout(const Duration(seconds: 10));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        AppLogger.instance.d('WebviewLogin', 'serviceLogin response: code=${data['code']}');
-
-        // 从响应中提取 location URL
-        String? loginUrl;
-        if (data['location'] != null) {
-          loginUrl = (data['location'] as String).trim();
-          // 移除可能的反引号包裹
-          if (loginUrl.startsWith('`') && loginUrl.endsWith('`')) {
-            loginUrl = loginUrl.substring(1, loginUrl.length - 1);
-          }
-        }
-
-        if (loginUrl != null && loginUrl.isNotEmpty) {
-          AppLogger.instance.i('WebviewLogin', 'Got login URL');
-          return loginUrl;
-        } else {
-          AppLogger.instance.e('WebviewLogin', 'No location in response: ${response.body}');
-          _controller.add(LoginEvent.error('无法获取登录页面: ${data['description'] ?? '未知错误'}'));
-          return null;
-        }
-      } else {
-        AppLogger.instance.e('WebviewLogin', 'serviceLogin HTTP ${response.statusCode}');
-        _controller.add(LoginEvent.error('网络请求失败: HTTP ${response.statusCode}'));
-        return null;
-      }
-    } catch (e, stackTrace) {
-      AppLogger.instance.e('WebviewLogin', 'fetchLoginUrl error: $e', stackTrace);
-      _controller.add(LoginEvent.error('获取登录页面失败: $e'));
-      return null;
-    }
-  }
-
-  /// 从当前页面提取 cookies
-  /// 优先使用 CookieManager（可读取 httpOnly cookies），失败则回退到 JS
-  Future<void> _extractCookies(InAppWebViewController webController, String url) async {
-    try {
-      // 方法1: CookieManager (可读取 httpOnly cookies)
-      // flutter_inappwebview 6.x 中 CookieManager.instance 的静态类型推断为 Function，
-      // 通过 dynamic 强制转换绕过静态分析
-      final cookies = await (CookieManager.instance as dynamic)
-          .getCookies(url: WebUri(url)) as List<dynamic>;
-      for (final cookie in cookies) {
-        final name = cookie.name as String? ?? '';
-        final value = cookie.value as String? ?? '';
-        if (name == 'serviceToken' && serviceToken == null) {
-          serviceToken = value;
-          AppLogger.instance.d('WebviewLogin', 'Found serviceToken via CookieManager');
-        }
-        if (name == 'ssecurity' && ssecurity == null) {
-          ssecurity = value;
-          AppLogger.instance.d('WebviewLogin', 'Found ssecurity via CookieManager');
-        }
-        if (name == 'userId' && userId == null) {
-          userId = value;
-        }
-      }
-
-      // 方法2: JavaScript (fallback, 不能读 httpOnly)
-      if (serviceToken == null || ssecurity == null) {
-        final result = await webController.evaluateJavascript(source: 'document.cookie');
-        if (result != null && result.isNotEmpty) {
-          final cookiesStr = result as String;
-          final pairs = cookiesStr.split(';');
-          for (final pair in pairs) {
-            final parts = pair.trim().split('=');
-            if (parts.length >= 2) {
-              final name = parts[0];
-              final value = parts.sublist(1).join('=');
-              if (name == 'serviceToken' && serviceToken == null) {
-                serviceToken = value;
-                AppLogger.instance.d('WebviewLogin', 'Found serviceToken via JS');
-              }
-              if (name == 'ssecurity' && ssecurity == null) {
-                ssecurity = value;
-                AppLogger.instance.d('WebviewLogin', 'Found ssecurity via JS');
-              }
-              if (name == 'userId' && userId == null) {
-                userId = value;
-              }
-            }
-          }
-        }
-      }
-
-      if (serviceToken != null && ssecurity != null) {
-        _emitSuccess();
-      }
-    } catch (e) {
-      AppLogger.instance.w('WebviewLogin', 'Cookie extraction failed: $e');
-      // JS fallback
-      try {
-        final result = await webController.evaluateJavascript(source: 'document.cookie');
-        if (result != null && result.isNotEmpty) {
-          final cookiesStr = result as String;
-          final pairs = cookiesStr.split(';');
-          for (final pair in pairs) {
-            final parts = pair.trim().split('=');
-            if (parts.length >= 2) {
-              final name = parts[0];
-              final value = parts.sublist(1).join('=');
-              if (name == 'serviceToken' && serviceToken == null) {
-                serviceToken = value;
-              }
-              if (name == 'ssecurity' && ssecurity == null) {
-                ssecurity = value;
-              }
-              if (name == 'userId' && userId == null) {
-                userId = value;
-              }
-            }
-          }
-          if (serviceToken != null && ssecurity != null) {
-            _emitSuccess();
-          }
-        }
-      } catch (e2) {
-        AppLogger.instance.w('WebviewLogin', 'JS fallback also failed: $e2');
-      }
-    }
-  }
-
-  /// 监听导航变化，捕获登录回调
-  Future<NavigationActionPolicy> onNavigation(NavigationAction action) async {
-    final url = action.request.url?.toString() ?? '';
-    AppLogger.instance.d('WebviewLogin', 'Navigating: $url');
-
-    // 检测 sts.api.io.mi.com 回调 → 登录成功
-    if (url.contains('sts.api.io.mi.com')) {
-      if (action.request.url != null) {
-        final uri = action.request.url!;
-
-        // 从 URL 查询参数获取 serviceToken
-        final params = uri.queryParameters;
-        if (params.containsKey('serviceToken') && serviceToken == null) {
-          serviceToken = params['serviceToken'];
-          AppLogger.instance.d('WebviewLogin', 'Found serviceToken in callback URL');
-        }
-
-        // 从 fragment 获取
-        final fragment = uri.fragment;
-        if (fragment.isNotEmpty) {
-          final fragUri = Uri.parse('https://dummy.com?$fragment');
-          if (fragUri.queryParameters.containsKey('serviceToken') && serviceToken == null) {
-            serviceToken = fragUri.queryParameters['serviceToken'];
-          }
-          if (fragUri.queryParameters.containsKey('ssecurity') && ssecurity == null) {
-            ssecurity = fragUri.queryParameters['ssecurity'];
-          }
-        }
-
-        // 尝试从 cookies 获取 ssecurity
-        // (将在 onLoadStop 中通过 JS 获取)
-      }
-    }
-
-    return NavigationActionPolicy.ALLOW;
-  }
-
-  /// 页面加载完成后提取凭据
-  Future<void> onLoadStop(InAppWebViewController webController, String url) async {
-    AppLogger.instance.d('WebviewLogin', 'Page loaded: $url');
-
-    // 方法1: 从 URL 参数提取（callback 页面）
-    if (url.contains('sts.api.io.mi.com')) {
-      final uri = Uri.parse(url);
-      if (uri.queryParameters.containsKey('serviceToken') && serviceToken == null) {
-        serviceToken = uri.queryParameters['serviceToken'];
-      }
-      final fragment = uri.fragment;
-      if (fragment.isNotEmpty) {
-        final fragUri = Uri.parse('https://dummy.com?$fragment');
-        if (fragUri.queryParameters.containsKey('serviceToken') && serviceToken == null) {
-          serviceToken = fragUri.queryParameters['serviceToken'];
-        }
-        if (fragUri.queryParameters.containsKey('ssecurity') && ssecurity == null) {
-          ssecurity = fragUri.queryParameters['ssecurity'];
-        }
-      }
-    }
-
-    // 方法2: 通过 CookieManager + JS 提取 cookies
-    await _extractCookies(webController, url);
-
-    // 方法3: 从多个域名尝试获取 cookies
-    final urlsToCheck = <String>[
-      'https://account.xiaomi.com',
-      'https://sts.api.io.mi.com',
-      url,
-    ];
-    for (final checkUrl in urlsToCheck) {
-      if (serviceToken != null && ssecurity != null) break;
-      await _extractCookies(webController, checkUrl);
-    }
-
-    if (serviceToken != null && ssecurity != null) {
-      _emitSuccess();
-    }
+    AppLogger.instance.i('XiaomiLogin',
+        '✅ Login success: userId=$userId, ssecurity=${ssecurity!.substring(0, 8)}..., serviceToken=${serviceToken!.substring(0, 8)}...');
+    _controller.add(LoginEvent.success(serviceToken!, ssecurity!, userId!));
   }
 
   void dispose() {
@@ -256,13 +381,22 @@ class WebviewLoginController {
 }
 
 class LoginEvent {
-  const LoginEvent.success(this.serviceToken, this.ssecurity)
-      : errorMessage = null;
+  const LoginEvent.success(this.serviceToken, this.ssecurity, this.userId)
+      : errorMessage = null, phone = null, countdown = null;
+  const LoginEvent.needCode(this.phone, this.countdown)
+      : errorMessage = null, serviceToken = null, ssecurity = null, userId = null;
+  const LoginEvent.loading([this.errorMessage])
+      : serviceToken = null, ssecurity = null, userId = null, phone = null, countdown = null;
   const LoginEvent.error(this.errorMessage)
-      : serviceToken = null, ssecurity = null;
+      : serviceToken = null, ssecurity = null, userId = null, phone = null, countdown = null;
 
   final String? serviceToken;
   final String? ssecurity;
+  final String? userId;
   final String? errorMessage;
+  final String? phone;
+  final int? countdown;
+
   bool get isSuccess => serviceToken != null;
+  bool get needCode => phone != null;
 }

@@ -171,7 +171,6 @@ public class XiaomiCloudClient
         var cookies = new Dictionary<string, string>
         {
             ["userId"] = _userId,
-            ["yetAnotherServiceToken"] = _serviceToken,
             ["serviceToken"] = _serviceToken,
             ["locale"] = "en_GB",
             ["timezone"] = "GMT+08:00",
