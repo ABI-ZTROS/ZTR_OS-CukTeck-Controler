@@ -21,7 +21,7 @@ jobs:
       - name: Generate Android scaffolding
         working-directory: android_app
         run: |
-          flutter create --platforms=android --project-name=CukTechController .
+          flutter create --platforms=android --project-name=cuktech_controller .
           # Copy custom Android source files (RootShell, MethodChannel)
           cp -r ../android-app-custom/kotlin/* android/app/src/main/kotlin/
       - name: Add custom Android permissions
