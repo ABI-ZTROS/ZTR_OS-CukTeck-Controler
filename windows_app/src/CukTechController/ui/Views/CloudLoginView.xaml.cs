@@ -33,7 +33,10 @@ public partial class CloudLoginView : UserControl
             await LoginWebView.EnsureCoreWebView2Async();
             LoginWebView.NavigationCompleted += OnNavigationCompleted;
             LoginWebView.CoreWebView2.NavigationStarting += OnNavigationStarting;
-            System.Diagnostics.Debug.WriteLine("[CloudLogin] WebView2 initialized");
+            
+            // 导航到米家登录页
+            LoginWebView.Source = new Uri("https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=True");
+            System.Diagnostics.Debug.WriteLine("[CloudLogin] WebView2 initialized, navigating to login page");
         }
         catch (Exception ex)
         {

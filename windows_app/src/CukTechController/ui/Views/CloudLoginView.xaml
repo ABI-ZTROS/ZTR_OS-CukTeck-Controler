@@ -17,11 +17,7 @@
                    FontSize="18" FontWeight="Bold"
                    HorizontalAlignment="Center" Margin="10"/>
 
-        <wv2:WebView2 Grid.Row="1" x:Name="LoginWebView">
-            <wv2:WebView2.Source>
-                <Uri>https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&amp;_json=True</Uri>
-            </wv2:WebView2.Source>
-        </wv2:WebView2>
+        <wv2:WebView2 Grid.Row="1" x:Name="LoginWebView" />
 
         <StackPanel Grid.Row="2" Orientation="Horizontal"
                     HorizontalAlignment="Center" Margin="10">
