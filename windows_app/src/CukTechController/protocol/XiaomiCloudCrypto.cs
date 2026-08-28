@@ -3,14 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
-using Org.BouncyCastle.Crypto.Engines;
-using Org.BouncyCastle.Crypto.Parameters;
 
 namespace CukTechController.Protocol;
 
 /// <summary>
 /// 米家云 API 加密工具 —— RC4-drop[1024] 加密 + 签名逻辑
 /// 严格参照 Python 参考实现 (xiaomi_cloud.py)
+/// 纯 C# 实现，无需外部依赖
 /// </summary>
 public static class XiaomiCloudCrypto
 {
@@ -23,8 +22,7 @@ public static class XiaomiCloudCrypto
     public static string Rc4Encrypt(string password, string payload)
     {
         var key = Convert.FromBase64String(password);
-        var engine = new Arc4Engine();
-        engine.Init(true, new KeyParameter(key));
+        using var engine = new Rc4Engine(key);
         // Drop first 1024 bytes of keystream
         engine.ProcessBlock(new byte[1024], 0, new byte[1024], 0);
         var input = Encoding.UTF8.GetBytes(payload);
@@ -45,8 +43,7 @@ public static class XiaomiCloudCrypto
     public static string Rc4Decrypt(string password, string payload)
     {
         var key = Convert.FromBase64String(password);
-        var engine = new Arc4Engine();
-        engine.Init(true, new KeyParameter(key));
+        using var engine = new Rc4Engine(key);
         // Drop first 1024 bytes of keystream
         engine.ProcessBlock(new byte[1024], 0, new byte[1024], 0);
         var input = Convert.FromBase64String(payload);
@@ -112,7 +109,7 @@ public static class XiaomiCloudCrypto
         };
 
         // 提取路径部分：url.split("com")[1].replace("/app/", "/")
-        // 如果 URL 不含 "com"，使用完整 URL 作为 fallback
+        // 如果 URL 不含 "com"，使用完整路径作为 fallback
         var urlParts = url.Split("com");
         if (urlParts.Length > 1)
         {
@@ -193,5 +190,63 @@ public static class XiaomiCloudCrypto
             (byte)(value >> 8),
             (byte)value
         };
+    }
+}
+
+/// <summary>
+/// 纯 C# RC4 引擎实现
+/// 参照 BouncyCastle 的 IStreamCipher 接口
+/// </summary>
+public class Rc4Engine : IDisposable
+{
+    private readonly byte[] _key;
+    private bool _initialized;
+    private int _x;
+    private int _y;
+    private readonly byte[] _state;
+
+    public Rc4Engine(byte[] key)
+    {
+        _key = key;
+        _state = new byte[256];
+        Init(key);
+    }
+
+    private void Init(byte[] key)
+    {
+        _initialized = true;
+        _x = 0;
+        _y = 0;
+        for (int i = 0; i < 256; i++)
+            _state[i] = (byte)i;
+
+        int j = 0;
+        for (int i = 0; i < 256; i++)
+        {
+            j = (j + _state[i] + key[i % key.Length]) & 255;
+            (_state[i], _state[j]) = (_state[j], _state[i]);
+        }
+    }
+
+    /// <summary>
+    /// 处理字节块（加密/解密）
+    /// </summary>
+    public void ProcessBlock(byte[] input, int inputOffset, byte[] output, int outputOffset)
+    {
+        if (!_initialized)
+            throw new InvalidOperationException("Engine not initialized");
+
+        for (int i = 0; i < input.Length; i++)
+        {
+            _x = (_x + 1) & 255;
+            _y = (_y + _state[_x]) & 255;
+            (_state[_x], _state[_y]) = (_state[_y], _state[_x]);
+            output[outputOffset + i] = (byte)(input[inputOffset + i] ^ _state[(_state[_x] + _state[_y]) & 255]);
+        }
+    }
+
+    public void Dispose()
+    {
+        _initialized = false;
     }
 }

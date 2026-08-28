@@ -59,6 +59,9 @@ public class XiaomiCloudClient
         _userId = userId;
         _location = location;
         _isLoggedIn = true;
+        
+        // 触发登录成功事件
+        LoginSuccess?.Invoke(this, new LoginSuccessEventArgs(serviceToken, ssecurity));
     }
 
     /// <summary>

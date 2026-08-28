@@ -12,7 +12,6 @@
     <!-- 注意: NativeAOT 与 WPF 不兼容; 发布使用 dotnet publish 加 self-contained 参数 -->
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="BouncyCastle" Version="1.8.9" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.2210.55" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="OxyPlot.Wpf" Version="2.2.0" />
