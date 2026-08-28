@@ -43,7 +43,7 @@ public class WindowsConnector : IDisposable
 
     private BluetoothLEDevice? _device;
     private readonly Dictionary<string, GattCharacteristic> _characteristics = new();
-    private readonly Dictionary<string, GattCharacteristicValueChangedEventHandler> _handlers = new();
+    private readonly Dictionary<string, Delegate> _handlers = new();
     private CancellationTokenSource? _cts;
     private bool _disposed;
 
@@ -119,7 +119,7 @@ public class WindowsConnector : IDisposable
         return false;
     }
 
-    private async Task SubscribeAllAsync(GattService fe95, CancellationToken ct)
+    private async Task SubscribeAllAsync(dynamic fe95, CancellationToken ct)
     {
         State = BleConnectionState.Subscribing;
 
@@ -149,13 +149,20 @@ public class WindowsConnector : IDisposable
                 GattClientCharacteristicConfigurationDescriptorValue.Notify);
             if (status == GattCommunicationStatus.Success)
             {
-                var handler = new GattCharacteristicValueChangedEventHandler((s, e) =>
+                Delegate handler = null!;
+                // 使用 dynamic 避免编译时检查 GattCharacteristicValueChangedEventHandler
+                // 该类型在 .NET 8 内置 WinRT 投影中可能不可用
+                dynamic dynChar = characteristic;
+                var callback = new Action<object, object>((s, e) =>
                 {
-                    var data = e.Value.ToArray();
+                    dynamic args = e;
+                    var data = args.Value.ToArray();
                     AppLogger.Debug($"BleNotify:{key} len={data.Length}");
                     ValueReceived?.Invoke(this, (key, data));
                 });
-                characteristic.CharacteristicValueChanged += handler;
+                // 通过 WinRT 事件注册
+                dynChar.CharacteristicValueChanged += callback;
+                handler = callback;
                 _handlers[key] = handler;
             }
 
@@ -215,7 +222,13 @@ public class WindowsConnector : IDisposable
         {
             if (_characteristics.TryGetValue(kv.Key, out var c))
             {
-                try { c.CharacteristicValueChanged -= kv.Value; } catch { }
+                try
+                {
+                    // 使用 dynamic 避免编译时检查
+                    dynamic dynChar = c;
+                    dynChar.CharacteristicValueChanged -= kv.Value;
+                }
+                catch { }
             }
         }
         _handlers.Clear();
