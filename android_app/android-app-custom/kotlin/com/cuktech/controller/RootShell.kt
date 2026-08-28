@@ -41,7 +41,7 @@ class RootShell {
         } catch (e: SecurityException) {
             throw e
         } catch (e: Exception) {
-            Log.e(TAG, "runCommand failed: $command", e)
+            Log.e(TAG, "runCommand failed: $command", e as Throwable)
             "EXCEPTION: ${e.message}"
         }
     }

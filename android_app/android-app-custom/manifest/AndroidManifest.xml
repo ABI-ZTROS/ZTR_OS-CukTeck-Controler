@@ -13,7 +13,6 @@
         android:label="酷态科控制器"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/LaunchTheme"
         android:usesCleartextTraffic="true"
