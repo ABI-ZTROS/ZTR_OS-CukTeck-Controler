@@ -28,58 +28,80 @@ namespace CukTechController.Ble
         public async Task<Dictionary<string, object?>?> SendAndReceiveAsync(
             WindowsConnector connector,
             byte[] plaintext,
-            int timeoutSec = 8)
+            int timeoutSec = 5)
         {
             if (!_crypto.HasKeys)
                 throw new InvalidOperationException("Session keys not established");
 
-            var encrypted = _crypto.Encrypt(plaintext);
-
-            try
+            for (int attempt = 1; attempt <= 3; attempt++)
             {
-                // 1. 发送头部
-                await connector.WriteAsync("cmd_send", new byte[] { 0, 0, 0, 0, 1, 0 });
-
-                // 2. 等 RCV_RDY
-                var rcvRdy = await WaitAsync(connector, "cmd_send", timeoutSec);
-                if (rcvRdy == null || rcvRdy.Length < 4 ||
-                    rcvRdy[2] != 1 || rcvRdy[3] != 1)
+                try
                 {
-                    AppLogger.Warn("EncryptedChannel: no RCV_RDY");
-                    return null;
+                    if (attempt > 1)
+                    {
+                        AppLogger.Warn($"EncryptedChannel: retry attempt {attempt}/3");
+                    }
+
+                    var encrypted = _crypto.Encrypt(plaintext);
+
+                    // 1. 发送头部
+                    await connector.WriteAsync("cmd_send", new byte[] { 0, 0, 0, 0, 1, 0 });
+
+                    // 2. 等 RCV_RDY
+                    var rcvRdy = await WaitAsync(connector, "cmd_send", timeoutSec);
+                    if (rcvRdy == null || rcvRdy.Length < 4 ||
+                        rcvRdy[2] != 1 || rcvRdy[3] != 1)
+                    {
+                        AppLogger.Warn($"EncryptedChannel: no RCV_RDY (attempt {attempt})");
+                        if (attempt >= 3) return null;
+                        continue;
+                    }
+
+                    // 3. 发送数据帧
+                    var frameData = new byte[2 + encrypted.Length];
+                    frameData[0] = 1; frameData[1] = 0;
+                    Array.Copy(encrypted, 0, frameData, 2, encrypted.Length);
+                    await connector.WriteAsync("cmd_send", frameData);
+
+                    // 4. 等 RCV_OK
+                    var rcvOk = await WaitAsync(connector, "cmd_send", timeoutSec);
+                    if (rcvOk == null || rcvOk.Length < 4 ||
+                        rcvOk[2] != 1 || rcvOk[3] != 0)
+                    {
+                        AppLogger.Warn($"EncryptedChannel: no RCV_OK (attempt {attempt})");
+                        if (attempt >= 3) return null;
+                        continue;
+                    }
+
+                    // 5. 等响应
+                    var resp = await WaitAsync(connector, "cmd_recv", timeoutSec);
+                    if (resp == null)
+                    {
+                        AppLogger.Warn($"EncryptedChannel: no response (attempt {attempt})");
+                        if (attempt >= 3) return null;
+                        continue;
+                    }
+
+                    // 解密
+                    var cipherPart = resp.Skip(2).ToArray();
+                    var pt = _crypto.Decrypt(cipherPart);
+                    if (pt == null)
+                    {
+                        AppLogger.Warn($"EncryptedChannel: decrypt failed (attempt {attempt})");
+                        if (attempt >= 3) return null;
+                        continue;
+                    }
+
+                    return MiotTlv.Parse(pt);
                 }
-
-                // 3. 发送数据帧
-                var frameData = new byte[2 + encrypted.Length];
-                frameData[0] = 1; frameData[1] = 0;
-                Array.Copy(encrypted, 0, frameData, 2, encrypted.Length);
-                await connector.WriteAsync("cmd_send", frameData);
-
-                // 4. 等 RCV_OK
-                var rcvOk = await WaitAsync(connector, "cmd_send", timeoutSec);
-                if (rcvOk == null || rcvOk.Length < 4 ||
-                    rcvOk[2] != 1 || rcvOk[3] != 0)
+                catch (Exception ex)
                 {
-                    AppLogger.Warn("EncryptedChannel: no RCV_OK");
-                    return null;
+                    AppLogger.Error($"EncryptedChannel: sendAndReceive attempt {attempt} failed: {ex.Message}");
+                    if (attempt >= 3) return null;
+                    await Task.Delay(500);
                 }
-
-                // 5. 等响应
-                var resp = await WaitAsync(connector, "cmd_recv", timeoutSec);
-                if (resp == null) return null;
-
-                // 解密
-                var cipherPart = resp.Skip(2).ToArray();
-                var pt = _crypto.Decrypt(cipherPart);
-                if (pt == null) return null;
-
-                return MiotTlv.Parse(pt);
             }
-            catch (Exception ex)
-            {
-                AppLogger.Error($"EncryptedChannel: sendAndReceive failed: {ex.Message}", ex);
-                return null;
-            }
+            return null;
         }
 
         /// <summary>

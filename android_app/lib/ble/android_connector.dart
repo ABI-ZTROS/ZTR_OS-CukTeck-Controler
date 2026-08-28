@@ -146,7 +146,7 @@ class AndroidConnector {
   /// 等待指定通道的下一个通知，带超时
   Future<List<int>?> waitNotification(
     String channel, {
-    Duration timeout = const Duration(seconds: 3),
+    Duration timeout = const Duration(seconds: 5),
   }) async {
     final completer = Completer<List<int>?>();
     late final StreamSubscription<BleNotification> sub;
@@ -170,13 +170,37 @@ class AndroidConnector {
   Future<void> write(String channel, List<int> data) async {
     final char = _characteristics[channel];
     if (char == null) throw StateError('Channel $channel not subscribed');
-    await char.write(data, withoutResponse: false);
+    for (int attempt = 1; attempt <= bleMaxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          AppLogger.instance.w('AndroidConnector', 'Write retry $attempt/$bleMaxRetries on $channel');
+        }
+        await char.write(data, withoutResponse: false).timeout(bleTimeout);
+        return;
+      } catch (e, stackTrace) {
+        AppLogger.instance.e('AndroidConnector', 'Write attempt $attempt failed: $e', stackTrace);
+        if (attempt >= bleMaxRetries) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+    }
   }
 
   Future<List<int>> read(String channel) async {
     final char = _characteristics[channel];
     if (char == null) throw StateError('Channel $channel not subscribed');
-    return char.read();
+    for (int attempt = 1; attempt <= bleMaxRetries; attempt++) {
+      try {
+        if (attempt > 1) {
+          AppLogger.instance.w('AndroidConnector', 'Read retry $attempt/$bleMaxRetries on $channel');
+        }
+        return await char.read().timeout(bleTimeout);
+      } catch (e, stackTrace) {
+        AppLogger.instance.e('AndroidConnector', 'Read attempt $attempt failed: $e', stackTrace);
+        if (attempt >= bleMaxRetries) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
+    }
+    throw StateError('Read failed after $bleMaxRetries attempts');
   }
 
   Future<void> disconnect() async {

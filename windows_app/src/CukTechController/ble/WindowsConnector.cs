@@ -181,9 +181,28 @@ public class WindowsConnector : IDisposable
         if (!_characteristics.TryGetValue(channel, out var c))
             throw new InvalidOperationException($"Channel {channel} not subscribed");
 
-        var result = await c.WriteValueAsync(data.AsBuffer());
-        if (result != GattCommunicationStatus.Success)
-            throw new InvalidOperationException($"Write {channel} failed: {result}");
+        for (int attempt = 1; attempt <= ProtocolConstants.BleMaxRetries; attempt++)
+        {
+            try
+            {
+                if (attempt > 1)
+                {
+                    AppLogger.Warn($"WindowsConnector: Write retry {attempt}/{ProtocolConstants.BleMaxRetries} on {channel}");
+                }
+
+                using var cts = new CancellationTokenSource(ProtocolConstants.BleTimeout);
+                var result = await c.WriteValueAsync(data.AsBuffer()).AsTask(cts.Token);
+                if (result != GattCommunicationStatus.Success)
+                    throw new InvalidOperationException($"Write {channel} failed: {result}");
+                return;
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error($"WindowsConnector: Write attempt {attempt} failed: {ex.Message}");
+                if (attempt >= ProtocolConstants.BleMaxRetries) throw;
+                await Task.Delay(500);
+            }
+        }
     }
 
     /// <summary>
@@ -194,10 +213,29 @@ public class WindowsConnector : IDisposable
         if (!_characteristics.TryGetValue(channel, out var c))
             throw new InvalidOperationException($"Channel {channel} not subscribed");
 
-        var result = await c.ReadValueAsync();
-        if (result.Status != GattCommunicationStatus.Success)
-            throw new InvalidOperationException($"Read {channel} failed: {result.Status}");
-        return result.Value.ToArray();
+        for (int attempt = 1; attempt <= ProtocolConstants.BleMaxRetries; attempt++)
+        {
+            try
+            {
+                if (attempt > 1)
+                {
+                    AppLogger.Warn($"WindowsConnector: Read retry {attempt}/{ProtocolConstants.BleMaxRetries} on {channel}");
+                }
+
+                using var cts = new CancellationTokenSource(ProtocolConstants.BleTimeout);
+                var result = await c.ReadValueAsync().AsTask(cts.Token);
+                if (result.Status != GattCommunicationStatus.Success)
+                    throw new InvalidOperationException($"Read {channel} failed: {result.Status}");
+                return result.Value.ToArray();
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error($"WindowsConnector: Read attempt {attempt} failed: {ex.Message}");
+                if (attempt >= ProtocolConstants.BleMaxRetries) throw;
+                await Task.Delay(500);
+            }
+        }
+        throw new InvalidOperationException($"Read failed after {ProtocolConstants.BleMaxRetries} attempts");
     }
 
     public async Task DisconnectAsync()
