@@ -24,7 +24,7 @@ class EncryptedChannel {
       throw StateError('Session keys not established');
     }
 
-    final encrypted = _crypto.encrypt(plaintext);
+    final encrypted = await _crypto.encrypt(plaintext);
 
     try {
       // 1. 发送头部
@@ -54,7 +54,7 @@ class EncryptedChannel {
       if (resp == null) return null;
 
       // 解密
-      final pt = _crypto.decrypt(resp.sublist(2));
+      final pt = await _crypto.decrypt(resp.sublist(2));
       if (pt == null) return null;
       return MiotTlv.parse(Uint8List.fromList(pt));
     } catch (e, stackTrace) {

@@ -15,7 +15,7 @@ Future<StreamSubscription<BleNotification>> wirePortDecoder(
 ) async {
   return connector.notifications
       .where((n) => n.channel == 'cmd_recv')
-      .listen((n) {
+      .listen((n) async {
     try {
       final ciphertext = n.data;
       if (ciphertext.length < 3) return;
@@ -27,7 +27,7 @@ Future<StreamSubscription<BleNotification>> wirePortDecoder(
         return;
       }
 
-      final plaintext = crypto.decrypt(ciphertext.sublist(2));
+      final plaintext = await crypto.decrypt(ciphertext.sublist(2));
       if (plaintext == null || plaintext.isEmpty) {
         AppLogger.instance.w('PortDecoder', 'Decrypt failed');
         return;

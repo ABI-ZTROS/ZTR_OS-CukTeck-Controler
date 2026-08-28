@@ -32,7 +32,7 @@ class _HomePageState extends State<HomePage> {
   bool _isConnecting = false;
   int _currentStep = -1;
   String? _errorMessage;
-  List<ScanResult> _scanResults = const [];
+  List<CuktechScanResult> _scanResults = const [];
   Map<int, PortState> _portStates = {}; // piid=1..4
 
   late final StreamSubscription<PortState> _subC1;
@@ -111,7 +111,7 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  Future<void> _connectTo(ScanResult target) async {
+  Future<void> _connectTo(CuktechScanResult target) async {
     setState(() {
       _isConnecting = true;
       _currentStep = 0;

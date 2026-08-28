@@ -75,7 +75,7 @@ const Map<int, String> protocolNames = <int, String>{
 };
 
 // ---- PD 固定电压 ----
-const Set<double> pdFixedVoltages = <double>{5.0, 9.0, 12.0, 15.0, 20.0};
+final Set<double> pdFixedVoltages = <double>{5.0, 9.0, 12.0, 15.0, 20.0};
 
 // ---- PDO 类型（按高字节） ----
 const Map<int, String> pdoKindByHighByte = <int, String>{

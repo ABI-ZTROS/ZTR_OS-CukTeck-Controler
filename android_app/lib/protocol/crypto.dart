@@ -1,10 +1,5 @@
 import 'dart:typed_data';
-import 'package:pointycastle/export.dart';
-import 'package:pointycastle/block/aes.dart';
-import 'package:pointycastle/modes/gcm.dart';
-import 'package:pointycastle/parameters/aead.dart';
-import 'package:pointycastle/parameters/key.dart';
-import 'package:pointycastle/api.dart';
+import 'package:cryptography/cryptography.dart';
 import '../utils/logger/logger.dart';
 
 /// AES-CCM 加解密工具（Dart 移植）
@@ -48,8 +43,8 @@ class CryptoEngine {
 
   /// 加密（发送方向：app_key + app_iv）
   ///
-  /// 返回: it_lo(2) + ciphertext（含 4 字节 tag）
-  List<int> encrypt(List<int> plaintext) {
+  /// 返回: it_lo(2) + ciphertext（含 tag）
+  Future<List<int>> encrypt(List<int> plaintext) async {
     if (_appKey == null || _appIv == null) {
       throw StateError('Session keys not set');
     }
@@ -62,7 +57,7 @@ class CryptoEngine {
     nonce[10] = (it >> 16) & 0xFF;
     nonce[11] = (it >> 24) & 0xFF;
 
-    final ciphertext = _aesCcmEncrypt(_appKey!, nonce, plaintext);
+    final ciphertext = await _aesCcmEncrypt(_appKey!, nonce, plaintext);
     _sendIt++;
 
     // it_lo(2) + ciphertext
@@ -75,7 +70,7 @@ class CryptoEngine {
   ///
   /// 输入: it_lo(2) + ciphertext
   /// 返回: plaintext 或 null
-  List<int>? decrypt(List<int> data) {
+  Future<List<int>?> decrypt(List<int> data) async {
     if (data.length < 6) return null;
     if (_devKey == null || _devIv == null) return null;
 
@@ -97,42 +92,29 @@ class CryptoEngine {
 
     final ciphertext = data.sublist(2);
     try {
-      return _aesCcmDecrypt(_devKey!, nonce, ciphertext);
+      return await _aesCcmDecrypt(_devKey!, nonce, ciphertext);
     } catch (e, stackTrace) {
       AppLogger.instance.e('CryptoEngine', 'Decrypt failed: $e', stackTrace);
       return null;
     }
   }
 
-  /// AES-CCM 加密（tag_length=4，使用 GCM 近似）
-  List<int> _aesCcmEncrypt(List<int> key, List<int> nonce, List<int> plain) {
-    final cipher = GCMBlockCipher(AesFastEngine());
-    cipher.init(
-      true,
-      AEADParameters(
-        KeyParameter(Uint8List.fromList(key)),
-        32, // 4 bytes tag * 8 = 32 bits
-        Uint8List.fromList(nonce),
-        Uint8List(0),
-      ),
+  /// AES-GCM 加密（使用 cryptography 包，输出包含 tag）
+  Future<List<int>> _aesCcmEncrypt(List<int> key, List<int> nonce, List<int> plain) async {
+    final cipher = AesGcm(key: SecretKey(Uint8List.fromList(key)));
+    final encrypted = await cipher.encrypt(
+      SecretBox(Uint8List.fromList(plain), nonce: Nonce(Uint8List.fromList(nonce))),
     );
-    final output = cipher.process(Uint8List.fromList(plain));
-    return output;
+    return encrypted.cipherText; // This includes tag appended
   }
 
-  /// AES-CCM 解密
-  List<int> _aesCcmDecrypt(List<int> key, List<int> nonce, List<int> ciphertext) {
-    final engine = GCMBlockCipher(AesFastEngine());
-    engine.init(
-      false,
-      AEADParameters(
-        KeyParameter(Uint8List.fromList(key)),
-        32,
-        Uint8List.fromList(nonce),
-        Uint8List(0),
-      ),
+  /// AES-GCM 解密
+  Future<List<int>> _aesCcmDecrypt(List<int> key, List<int> nonce, List<int> ciphertext) async {
+    final cipher = AesGcm(key: SecretKey(Uint8List.fromList(key)));
+    final decrypted = await cipher.decrypt(
+      SecretBox(Uint8List.fromList(ciphertext), nonce: Nonce(Uint8List.fromList(nonce))),
     );
-    return engine.process(Uint8List.fromList(ciphertext));
+    return decrypted.cipherText;
   }
 
   static String _hex(List<int> data) =>
