@@ -9,11 +9,9 @@
     <AssemblyName>CukTechController</AssemblyName>
     <RootNamespace>CukTechController</RootNamespace>
     <Version>0.1.0</Version>
-    <!-- 允许直接引用 WinMD 文件 -->
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.Windows.SDK.Contracts" Version="10.0.19041.1000" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
     <PackageReference Include="OxyPlot.Wpf" Version="2.2.0" />
   </ItemGroup>
