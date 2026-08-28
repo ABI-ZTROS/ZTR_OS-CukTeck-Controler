@@ -70,7 +70,7 @@ public class AppLogger
             if (_buffer.Count > _maxBuffer)
                 _buffer.RemoveRange(0, _buffer.Count - _maxBuffer);
         }
-        Debug.WriteLine(line);
+        System.Diagnostics.Debug.WriteLine(line);
         ThreadPool.QueueUserWorkItem(_ => WriteToDisk(line));
         LogWritten?.Invoke(this, line);
     }
@@ -117,8 +117,8 @@ public class AppLogger
     // ---- 快捷方法（带 tag 的新 API） ----
 
     public void V(string tag, string msg) => Log(LogLevel.Verbose, tag, msg);
-    public void D(string tag, string msg) => Log(LogLevel.Debug, tag, msg);
-    public void I(string tag, string msg) => Log(LogLevel.Info, tag, msg);
+    public void D(string tag, string msg, Exception? ex = null) => Log(LogLevel.Debug, tag, msg, ex);
+    public void I(string tag, string msg, Exception? ex = null) => Log(LogLevel.Info, tag, msg, ex);
     public void W(string tag, string msg, Exception? ex = null) => Log(LogLevel.Warning, tag, msg, ex);
     public void E(string tag, string msg, Exception? ex = null) => Log(LogLevel.Error, tag, msg, ex);
 
@@ -128,6 +128,7 @@ public class AppLogger
     public static void Info(string message, Exception? ex = null) => Instance.I("App", message, ex);
     public static void Warning(string message, Exception? ex = null) => Instance.W("App", message, ex);
     public static void Error(string message, Exception? ex = null) => Instance.E("App", message, ex);
+    public static void Warn(string message, Exception? ex = null) => Instance.W("Warn", message, ex);
 }
 
 /// <summary>

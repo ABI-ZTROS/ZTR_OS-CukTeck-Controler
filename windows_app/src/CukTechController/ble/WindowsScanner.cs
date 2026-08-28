@@ -131,7 +131,7 @@ public class WindowsScanner : IDisposable
     {
         if (_disposed) return;
         Stop();
-        _watcher?.Dispose();
+        _watcher = null;
         _disposed = true;
     }
 }

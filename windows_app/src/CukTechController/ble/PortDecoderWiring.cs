@@ -34,7 +34,7 @@ namespace CukTechController.Ble
                     var crypto = CryptoEngine.Instance;
                     if (!crypto.HasKeys)
                     {
-                        AppLogger.Warn("PortDecoderWiring", "No session keys, cannot decrypt");
+                        AppLogger.Warn("PortDecoderWiring: No session keys, cannot decrypt");
                         return;
                     }
 
@@ -42,7 +42,7 @@ namespace CukTechController.Ble
                     var plaintext = crypto.Decrypt(ciphertext);
                     if (plaintext == null || plaintext.Length == 0)
                     {
-                        AppLogger.Warn("PortDecoderWiring", "Decrypt failed");
+                        AppLogger.Warn("PortDecoderWiring: Decrypt failed");
                         return;
                     }
 

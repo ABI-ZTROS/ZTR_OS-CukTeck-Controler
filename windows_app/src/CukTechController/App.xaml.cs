@@ -1,6 +1,7 @@
 using System;
 using System.Windows;
 using System.Windows.Threading;
+using CukTechController.Protocol;
 using CukTechController.Utils;
 
 namespace CukTechController;
@@ -44,7 +45,7 @@ public partial class App : Application
         try
         {
             // 加载设置
-            await Settings.Instance.LoadAsync();
+            await SettingsService.Instance.LoadAsync();
 
             // 初始化其他服务
             // TODO: 初始化 BLE 管理器等

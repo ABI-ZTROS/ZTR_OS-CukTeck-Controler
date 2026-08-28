@@ -236,7 +236,8 @@ public class WindowsConnector : IDisposable
 
         if (_device != null)
         {
-            try { _device.Dispose(); } catch { }
+            // BluetoothLEDevice doesn't implement IDisposable in WinRT projection
+            // We just release the reference and let GC handle cleanup
             _device = null;
         }
     }
