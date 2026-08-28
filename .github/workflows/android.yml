@@ -21,6 +21,42 @@ jobs:
         with:
           distribution: zulu
           java-version: '17'
+      - name: Generate Android scaffolding
+        working-directory: android_app
+        run: |
+          flutter create --platforms=android --project-name=CukTechController .
+          # Copy custom Android source files (RootShell, MethodChannel)
+          cp -r ../android-app-custom/kotlin/* android/app/src/main/kotlin/
+          # Update AndroidManifest.xml with custom permissions
+          python3 -c "
+          import re
+          manifest = 'android/app/src/main/AndroidManifest.xml'
+          with open(manifest, 'r') as f:
+              content = f.read()
+          # Add custom permissions before <application>
+          custom_perms = '''
+    <!-- 蓝牙权限 -->
+    <uses-permission android:name=\"android.permission.BLUETOOTH\" />
+    <uses-permission android:name=\"android.permission.BLUETOOTH_ADMIN\" />
+    <uses-permission android:name=\"android.permission.BLUETOOTH_CONNECT\" />
+    <uses-permission android:name=\"android.permission.BLUETOOTH_SCAN\" />
+    <!-- 位置权限 -->
+    <uses-permission android:name=\"android.permission.ACCESS_FINE_LOCATION\" />
+    <uses-permission android:name=\"android.permission.ACCESS_COARSE_LOCATION\" />
+    <!-- 存储权限 -->
+    <uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" />
+    <uses-permission android:name=\"android.permission.WRITE_EXTERNAL_STORAGE\" />
+    <!-- Root 权限 -->
+    <uses-permission android:name=\"android.permission.WRITE_SECURE_SETTINGS\" />
+'''
+          content = content.replace('<application', custom_perms + '\n    <application')
+          # Add flutterEmbedding meta-data
+          content = content.replace(
+              'android:configChanges=',
+              'android:usesCleartextTraffic=\"true\"\\n            android:configChanges=')
+          with open(manifest, 'w') as f:
+              f.write(content)
+          "
       - name: Build APK
         working-directory: android_app
         run: |

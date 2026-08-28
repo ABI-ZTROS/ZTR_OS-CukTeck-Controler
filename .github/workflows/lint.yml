@@ -20,6 +20,10 @@ jobs:
         with:
           channel: stable
           cache: true
+      - name: Generate Android scaffolding
+        working-directory: android_app
+        run: |
+          flutter create --platforms=android --project-name=CukTechController .
       - name: Dart analyze
         working-directory: android_app
         run: |
