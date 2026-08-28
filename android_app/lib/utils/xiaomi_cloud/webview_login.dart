@@ -86,18 +86,6 @@ class XiaomiLoginController {
     return digest.toString().toUpperCase();
   }
 
-  /// 设置 cookies 到 http.Client
-  void _setCookies(Map<String, String> cookies) {
-    final buffer = StringBuffer();
-    cookies.forEach((k, v) {
-      if (v.isNotEmpty) {
-        if (buffer.isNotEmpty) buffer.write('; ');
-        buffer.write('$k=$v');
-      }
-    });
-    _httpClient.send(http.Request('GET', Uri.parse('https://account.xiaomi.com'))
-      ..headers['Cookie'] = buffer.toString());
-  }
 
   /// 把 response 的 Set-Cookie 头提取为 Map
   Map<String, String> _extractSetCookies(http.Response response) {
