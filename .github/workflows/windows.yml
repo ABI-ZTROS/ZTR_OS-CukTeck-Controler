@@ -25,7 +25,7 @@ jobs:
           # 注意: WPF 不支持 NativeAOT，使用 JIT 编译的自包含部署
           dotnet publish -c Release -r win-x64 --self-contained true -o publish
           echo "=== Build output ==="
-          ls -la publish/
+          Get-ChildItem publish/
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
