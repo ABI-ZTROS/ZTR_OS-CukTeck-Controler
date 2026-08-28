@@ -1,4 +1,4 @@
-import '../protocol/constants.dart';
+import 'constants.dart';
 
 /// 端口状态模型
 class PortState {

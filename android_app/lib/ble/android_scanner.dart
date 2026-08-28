@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:flutter_blue_plus/flutter_blue_plus.dart' hide ScanResult;
+import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import '../utils/logger/logger.dart';
 import '../protocol/constants.dart';
 
@@ -30,7 +30,7 @@ class AndroidScanner {
   static final AndroidScanner instance = AndroidScanner._();
 
   final List<ScanResult> _results = <ScanResult>[];
-  StreamSubscription<BluetoothDiscoveryResult>? _sub;
+  StreamSubscription<ScanResult>? _sub;
   bool _isScanning = false;
 
   bool get isScanning => _isScanning;
@@ -52,8 +52,7 @@ class AndroidScanner {
     _isScanning = true;
 
     try {
-      _sub = FlutterBluePlus.onScanResults.listen((event) {
-        final r = event.result;
+      _sub = FlutterBluePlus.onScanResults.listen((r) {
         final name = r.advertisementData.localName ?? r.device.platformName ?? '';
         final isCuktech =
             name.toLowerCase().contains('njcuk') ||
@@ -77,11 +76,10 @@ class AndroidScanner {
         AppLogger.instance.e('AndroidScanner', 'Scan error: $e', stackTrace);
       });
 
-      // 监听扫描结果订阅前先 startScan
+      // 开始扫描
       await FlutterBluePlus.startScan(
         withServices: [Guid(uuidFe95)],
         timeout: timeout,
-        allowDuplicates: false,
       );
 
       // 超时结束

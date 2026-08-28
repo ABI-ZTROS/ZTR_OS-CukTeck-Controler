@@ -17,7 +17,7 @@ class PortCard extends StatelessWidget {
   final VoidCallback? onToggle;
   final VoidCallback? onOpenControl;
 
-  String get _display(double v) {
+  String _display(double v) {
     // 未连接显示 --，活跃时才显示数值
     if (state == null) return '--';
     if (!state!.active && v == 0) return '--';

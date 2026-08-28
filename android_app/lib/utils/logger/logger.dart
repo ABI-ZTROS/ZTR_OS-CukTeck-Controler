@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:developer';
+import 'dart:developer' as developer;
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 
@@ -49,8 +49,8 @@ class AppLogger {
       _bufferedLogs.removeRange(0, _bufferedLogs.length - _maxBuffer);
     }
     // 输出到 Logcat
-    debugPrint(line);
-    if (error != null) debugPrint('$error\n$stack');
+    developer.debugPrint(line);
+    if (error != null) developer.debugPrint('$error\n$stack');
     // 异步写文件（非阻塞）
     _writeToFile(line, error, stack);
   }
