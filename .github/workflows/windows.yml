@@ -17,14 +17,18 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Build
+      - name: Build NativeAOT self-contained
         working-directory: windows_app/src/CukTechController
         run: |
           dotnet restore
-          dotnet publish -c Release -r win-x64 --self-contained false -o publish
+          # Self-contained NativeAOT: single exe, no runtime dependency
+          # Includes .NET runtime + AOT-compiled IL
+          dotnet publish -c Release -r win-x64 --self-contained true /p:PublishAot=true -o publish
+          echo "=== Build output ==="
+          ls -la publish/
       - uses: actions/upload-artifact@v4
         continue-on-error: true
         with:
-          name: windows-exe
+          name: windows-self-contained-aot
           path: windows_app/src/CukTechController/publish/
-          retention-days: 7
+          retention-days: 30

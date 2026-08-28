@@ -9,6 +9,10 @@
     <AssemblyName>CukTechController</AssemblyName>
     <RootNamespace>CukTechController</RootNamespace>
     <Version>0.1.0</Version>
+    <!-- NativeAOT: AOT compile + self-contained runtime -->
+    <PublishAot>true</PublishAot>
+    <EnableAotAnalyzers>true</EnableAotAnalyzers>
+    <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />

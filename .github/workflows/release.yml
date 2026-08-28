@@ -5,8 +5,8 @@ on:
   workflow_dispatch:
 
 env:
-  ANDROID_ARTIFACT: android-apk
-  WINDOWS_ARTIFACT: windows-exe
+  ANDROID_ARTIFACT: android-apks
+  WINDOWS_ARTIFACT: windows-self-contained-aot
 
 jobs:
   android-release:
@@ -20,18 +20,26 @@ jobs:
         with:
           distribution: zulu
           java-version: '17'
-      - name: Build APK
+      - name: Generate Android scaffolding
+        working-directory: android_app
+        run: |
+          flutter create --platforms=android --project-name=cuktech_controller .
+          if [ -d android-app-custom/kotlin ]; then
+            cp -r android-app-custom/kotlin/* android/app/src/main/kotlin/
+          fi
+      - name: Build APK (all ABIs, split-per-abi)
         working-directory: android_app
         run: |
           flutter pub get
-          flutter build apk --release
+          flutter build apk --release --split-per-abi --target-platform android-arm,android-arm64,android-x64,android-x86
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ANDROID_ARTIFACT }}
-          path: android_app/build/app/outputs/flutter-apk/app-release.apk
+          path: android_app/build/app/outputs/flutter-apk/*.apk
+          retention-days: 90
       - uses: softprops/action-gh-release@v2
         with:
-          files: android_app/build/app/outputs/flutter-apk/app-release.apk
+          files: android_app/build/app/outputs/flutter-apk/*.apk
 
   windows-release:
     runs-on: windows-latest
@@ -40,15 +48,16 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 8.0.x
-      - name: Build
+      - name: Build NativeAOT self-contained
         working-directory: windows_app/src/CukTechController
         run: |
           dotnet restore
-          dotnet publish -c Release -r win-x64 --self-contained false -o publish
+          dotnet publish -c Release -r win-x64 --self-contained true /p:PublishAot=true -o publish
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ env.WINDOWS_ARTIFACT }}
           path: windows_app/src/CukTechController/publish/
+          retention-days: 90
       - uses: softprops/action-gh-release@v2
         with:
           files: windows_app/src/CukTechController/publish/**
