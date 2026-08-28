@@ -95,7 +95,7 @@ class DeviceInfo {
     this.model = '',
     this.serialNumber = '',
     this.firmwareVersion = '',
-    this.productId = productId,
+    this.productId = 0x660e,
     this.hardwareVersion = '',
   });
 

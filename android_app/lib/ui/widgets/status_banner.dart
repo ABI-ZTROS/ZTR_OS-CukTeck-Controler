@@ -60,7 +60,7 @@ class StatusBanner extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(
-                    done ? Icons.check_circle : current ? Icons.radio_button : Icons.circle,
+                    done ? Icons.check_circle : current ? Icons.radio_button_checked : Icons.circle,
                     size: 16,
                     color: done ? Colors.green : current ? Colors.blue : Colors.grey,
                   ),

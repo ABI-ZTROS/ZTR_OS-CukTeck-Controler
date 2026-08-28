@@ -119,7 +119,8 @@ class AndroidConnector {
         orElse: () => throw StateError('Char ${entry.value} not found'),
       );
       _characteristics[entry.key] = char;
-      if (char.isNotifiable) {
+      if (char.properties.contains(GattCharacteristicProperty.notify) ||
+          char.properties.contains(GattCharacteristicProperty.indicate)) {
         await char.setNotifyValue(true);
         _notifySubs[entry.key] = char.lastValueStream.listen(
           (data) {

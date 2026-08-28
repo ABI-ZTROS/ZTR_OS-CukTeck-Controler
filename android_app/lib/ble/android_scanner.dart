@@ -30,7 +30,7 @@ class AndroidScanner {
   static final AndroidScanner instance = AndroidScanner._();
 
   final List<ScanResult> _results = <ScanResult>[];
-  StreamSubscription<ScanResult>? _sub;
+  StreamSubscription<List<ScanResult>>? _sub;
   bool _isScanning = false;
 
   bool get isScanning => _isScanning;
@@ -52,25 +52,27 @@ class AndroidScanner {
     _isScanning = true;
 
     try {
-      _sub = FlutterBluePlus.onScanResults.listen((r) {
-        final name = r.advertisementData.localName ?? r.device.platformName ?? '';
-        final isCuktech =
-            name.toLowerCase().contains('njcuk') ||
-            r.device.remoteId.str.toLowerCase().contains('cuk');
-        // 检查 Service UUID 0xFE95
-        final hasFe95 = r.advertisementData.serviceUuids
-            .any((u) => u.str == uuidFe95);
-        if (!filterCuktech || isCuktech || hasFe95) {
-          _results.add(ScanResult(
-            device: r.device,
-            rssi: r.rssi,
-            localName: name,
-            isCuktech: isCuktech || hasFe95,
-          ));
-          AppLogger.instance.d(
-            'AndroidScanner',
-            'Found ${r.device.remoteId.str} rssi=${r.rssi} name=$name',
-          );
+      _sub = FlutterBluePlus.onScanResults.listen((results) {
+        for (final r in results) {
+          final name = r.advertisementData.localName ?? r.device.platformName ?? '';
+          final isCuktech =
+              name.toLowerCase().contains('njcuk') ||
+              r.device.remoteId.str.toLowerCase().contains('cuk');
+          // 检查 Service UUID 0xFE95
+          final hasFe95 = r.advertisementData.serviceUuids
+              .any((u) => u.str == uuidFe95);
+          if (!filterCuktech || isCuktech || hasFe95) {
+            _results.add(ScanResult(
+              device: r.device,
+              rssi: r.rssi,
+              localName: name,
+              isCuktech: isCuktech || hasFe95,
+            ));
+            AppLogger.instance.d(
+              'AndroidScanner',
+              'Found ${r.device.remoteId.str} rssi=${r.rssi} name=$name',
+            );
+          }
         }
       }, onError: (e, stackTrace) {
         AppLogger.instance.e('AndroidScanner', 'Scan error: $e', stackTrace);

@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
-import 'package:pointycastle/api.dart';
-import 'package:pointycastle/key_derivators/hkdf.dart';
 import '../ble/android_connector.dart';
 import '../utils/logger/logger.dart';
 import 'constants.dart';
@@ -188,20 +187,23 @@ class Authenticator {
   }
 
   List<int> _hkdfSha256(List<int> ikm, List<int> salt, int length) {
-    final hkdf = HKDFKeyDerivator(Sha256Digest());
-    hkdf.init(HkdfParameters(Uint8List.fromList(ikm), length, Uint8List.fromList(salt), null));
-    final output = Uint8List(length);
-    hkdf.deriveKeys(output);
-    return output.toList();
+    // Extract
+    final hmacKey = Hmac(sha256, salt).convert(ikm).bytes;
+    // Expand
+    final result = <int>[];
+    var previous = <int>[];
+    var counter = 1;
+    while (result.length < length) {
+      final input = <int>[...previous, counter];
+      previous = Hmac(sha256, hmacKey).convert(input).bytes;
+      result.addAll(previous);
+      counter++;
+    }
+    return result.sublist(0, length);
   }
 
   List<int> _hmacSha256(List<int> key, List<int> data) {
-    final hmac = HMac(Sha256Digest(), 64);
-    hmac.init(KeyParameter(Uint8List.fromList(key)));
-    hmac.update(Uint8List.fromList(data), 0, data.length);
-    final output = Uint8List(32);
-    hmac.doFinal(output, 0);
-    return output.toList();
+    return Hmac(sha256, key).convert(data).bytes;
   }
 
   bool _listEquals(List<int> a, List<int> b) {
