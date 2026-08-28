@@ -31,10 +31,10 @@
                         <ColumnDefinition Width="*"/>
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Grid.Column="0" Text="{Binding IsOn, StringFormat={0}}"
+                    <TextBlock Grid.Column="0" Text="{Binding IsOn}"
                                Foreground="{StaticResource TextPrimaryBrush}"
                                VerticalAlignment="Center"/>
-                    <Button Grid.Column="1" Content="{Binding IsOn, Converter={StaticResource BoolToOnOffConv}}"
+                    <Button Grid.Column="1" Content="切换"
                             Command="{Binding TogglePortCommand}"
                             Style="{StaticResource PrimaryButton}"/>
                 </Grid>

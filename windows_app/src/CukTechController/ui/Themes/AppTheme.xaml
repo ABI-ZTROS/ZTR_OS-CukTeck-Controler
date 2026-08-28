@@ -44,7 +44,6 @@
         <Setter Property="Background" Value="{StaticResource PrimaryBrush}" />
         <Setter Property="Foreground" Value="White" />
         <Setter Property="Padding" Value="16,8" />
-        <Setter Property="BorderRadius" Value="8" />
     </Style>
 
     <!-- ===== 端口卡片按钮样式 ===== -->
@@ -52,7 +51,6 @@
         <Setter Property="Background" Value="{StaticResource PrimaryBrush}"/>
         <Setter Property="Foreground" Value="White"/>
         <Setter Property="Padding" Value="12,6"/>
-        <Setter Property="BorderRadius" Value="4"/>
     </Style>
 
     <!-- ===== 卡片样式 ===== -->
