@@ -218,6 +218,12 @@ public class XiaomiCloudClient
             {
                 System.Diagnostics.Debug.WriteLine($"[XiaomiCloudClient] Error: {ex.Message}, Retry {retry + 1}");
             }
+            catch (Exception ex)
+            {
+                // 所有重试失败，触发错误事件
+                System.Diagnostics.Debug.WriteLine($"[XiaomiCloudClient] All retries failed: {ex.Message}");
+                LoginError?.Invoke(this, new LoginErrorEventArgs($"API call failed after retries: {ex.Message}"));
+            }
         }
         return null;
     }
