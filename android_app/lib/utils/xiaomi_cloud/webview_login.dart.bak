@@ -88,27 +88,16 @@ class XiaomiLoginController {
 
 
   /// 把 response 的 Set-Cookie 头提取为 Map
-  ///
-  /// http package 会把多个同名 Set-Cookie 头用逗号 join，
-  /// 但 cookie 值里不含逗号，Expires 属性里含逗号（如 "Sat, 12 Sep 2026"），
-  /// 所以用正则直接匹配 "key=value" 模式（值终止于 ; 或 ,）。
   Map<String, String> _extractSetCookies(http.Response response) {
     final result = <String, String>{};
-    final raw = response.headers['set-cookie'] ?? '';
-    if (raw.isEmpty) return result;
-    // 匹配 cookie 名值对：name=value（终止于 ; , 或末尾）
-    final cookiePattern = RegExp(r'([a-zA-Z_][a-zA-Z0-9_\-]*)=([^;,]+?)[;,\s]');
-    for (final m in cookiePattern.allMatches(raw)) {
-      final name = m.group(1)!;
-      final value = m.group(2)!;
-      // 跳过 Set-Cookie 属性（Domain, Path, Expires 等）
-      const attrs = {'domain', 'path', 'expires', 'max-age', 'secure', 'httponly', 'samesite'};
-      if (!attrs.contains(name.toLowerCase())) {
-        result[name] = value;
+    final rawCookies = response.headers['set-cookie'] ?? '';
+    // http package joins multiple Set-Cookie with comma, split carefully
+    for (final hdr in rawCookies.split(', ')) {
+      final match = RegExp(r'^([^=]+)=([^;]+)').firstMatch(hdr);
+      if (match != null) {
+        result[match.group(1)!] = match.group(2)!;
       }
     }
-    AppLogger.instance.d('XiaomiLogin',
-        '_extractSetCookies: found ${result.length} cookies: ${result.keys.join(", ")}');
     return result;
   }
 
@@ -123,12 +112,8 @@ class XiaomiLoginController {
           .map((e) => '${e.key}=${e.value}')
           .join('; ');
     }
-    AppLogger.instance.d('XiaomiLogin',
-        'GET ${uri.path} cookies=[${_sessionCookies.keys.join(",")}]');
     final resp = await _httpClient.get(uri, headers: headers);
     _sessionCookies.addAll(_extractSetCookies(resp));
-    AppLogger.instance.d('XiaomiLogin',
-        '  ↳ ${resp.statusCode}, body=${resp.body.substring(0, resp.body.length > 200 ? 200 : resp.body.length)}');
     return resp;
   }
 
@@ -146,12 +131,8 @@ class XiaomiLoginController {
     final body = params?.entries
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&') ?? '';
-    AppLogger.instance.d('XiaomiLogin',
-        'POST ${uri.path} cookies=[${_sessionCookies.keys.join(",")}] body=${body.substring(0, body.length > 100 ? 100 : body.length)}');
     final resp = await _httpClient.post(uri, headers: headers, body: body);
     _sessionCookies.addAll(_extractSetCookies(resp));
-    AppLogger.instance.d('XiaomiLogin',
-        '  ↳ ${resp.statusCode}, body=${resp.body.substring(0, resp.body.length > 300 ? 300 : resp.body.length)}');
     return resp;
   }
 
@@ -247,25 +228,14 @@ class XiaomiLoginController {
     await _get('https://account.xiaomi.com/identity/auth/verifyPhone',
         params: {'_flag': '$flag', '_json': 'true'});
 
-    // Step 6: sendPhoneTicket → 发送短信（带上 context 和 sid）
+    // Step 6: sendPhoneTicket → 发送短信
     final r6 = await _post('https://account.xiaomi.com/identity/auth/sendPhoneTicket',
-        params: {
-          'retry': '0',
-          'icode': '',
-          '_json': 'true',
-          'context': context,
-          'sid': 'xiaomiio',
-        });
+        params: {'retry': '0', 'icode': '', '_json': 'true'});
     final d6 = _parseXiaomiJson(r6.body);
     final wt = d6['data']?['wt'] as int? ?? 0;
 
     if (d6['code'] != 0) {
-      final desc = d6['desc'] ?? d6['message'] ?? '';
-      final tips = d6['tips'] ?? '';
-      final errMsg = tips.isNotEmpty ? tips : (desc.isNotEmpty ? desc : '未知错误');
-      AppLogger.instance.e('XiaomiLogin',
-          'sendPhoneTicket FAILED: code=${d6['code']}, desc=$desc, tips=$tips');
-      _controller.add(LoginEvent.error('发送验证码失败($errMsg)'));
+      _controller.add(LoginEvent.error('发送验证码失败: ${d6['desc'] ?? d6['message']}'));
       return;
     }
 
