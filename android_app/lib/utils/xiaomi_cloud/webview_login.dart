@@ -36,7 +36,7 @@ class WebviewLoginController {
   Future<void> _extractCookies(String url) async {
     try {
       final uri = Uri.parse(url);
-      final cookies = await CookieManager.instance().getCookies(url: uri);
+      final cookies = await CookieManager.instance.getCookies(url: uri);
       for (final cookie in cookies) {
         if (cookie.name == 'serviceToken' && serviceToken == null) {
           serviceToken = cookie.value;

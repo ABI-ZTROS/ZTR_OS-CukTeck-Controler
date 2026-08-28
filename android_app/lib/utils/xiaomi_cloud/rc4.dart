@@ -23,7 +23,8 @@ import 'package:pointycastle/export.dart';
 /// ```
 String encryptRc4(String password, String payload) {
   final key = base64Decode(password);
-  final engine = Arc4Engine(key);
+  final engine = Arc4Engine();
+  engine.init(true, KeyParameter(key));
   // 丢弃前 1024 字节输出以消除 RC4 偏差
   engine.process(Uint8List(1024));
   final plaintext = utf8.encode(payload);
@@ -44,7 +45,8 @@ String encryptRc4(String password, String payload) {
 /// ```
 String decryptRc4(String password, String payload) {
   final key = base64Decode(password);
-  final engine = Arc4Engine(key);
+  final engine = Arc4Engine();
+  engine.init(true, KeyParameter(key));
   // 丢弃前 1024 字节输出以消除 RC4 偏差
   engine.process(Uint8List(1024));
   final ciphertext = base64Decode(payload);

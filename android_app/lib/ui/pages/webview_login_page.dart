@@ -49,7 +49,7 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
   Future<void> _clearCookiesAndReload() async {
     try {
       // 清除旧 cookies 重新开始
-      await CookieManager.instance().clearCookies();
+      await CookieManager.instance.clearCookies();
       await _webController?.reload();
     } catch (e) {
       AppLogger.instance.w('WebviewLoginPage', 'Clear cookies failed: $e');
