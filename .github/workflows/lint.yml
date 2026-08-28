@@ -1,0 +1,52 @@
+name: Lint & Analyze
+on:
+  pull_request:
+    paths:
+      - 'android_app/**'
+      - 'windows_app/**'
+  push:
+    branches: [main]
+    paths:
+      - 'android_app/**'
+      - 'windows_app/**'
+
+jobs:
+  dart-analyze:
+    name: Flutter/Dart analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Dart analyze
+        working-directory: android_app
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos
+      - name: Dart format check
+        working-directory: android_app
+        run: |
+          dart format --set-exit-if-changed lib/
+
+  dotnet-build:
+    name: .NET build check
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore
+        working-directory: windows_app/src/CukTechController
+        run: dotnet restore
+      - name: Build
+        working-directory: windows_app/src/CukTechController
+        run: dotnet build -c Release -p:GenerateDocumentationFile=false
+      - name: Check no warnings
+        working-directory: windows_app/src/CukTechController
+        run: |
+          # 严格模式：将 warnings 视作 errors（由 Directory.Build.props 控制）
+          dotnet build -c Release -clp:ErrorsOnly

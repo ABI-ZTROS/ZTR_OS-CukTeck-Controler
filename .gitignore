@@ -1,0 +1,34 @@
+# Flutter/Dart
+.dart_tool/
+.packages
+.pub/
+build/
+flutter_*.log
+*.iml
+.idea/
+.vscode/
+
+# Android
+android/.gradle/
+android/local.properties
+android/**/GeneratedPluginRegistrant.*
+
+# .NET / WPF
+windows_app/bin/
+windows_app/obj/
+windows_app/**/*.user
+windows_app/**/*.suo
+windows_app/**/TestResults/
+windows_app/**/packages/
+
+# 系统
+.DS_Store
+Thumbs.db
+*.log
+.env
+.env.local
+
+# 凭据（禁止提交 Token/密钥）
+secrets/
+*.key
+keystore.properties

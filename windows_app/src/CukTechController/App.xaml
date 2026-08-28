@@ -1,0 +1,19 @@
+<Application x:Class="CukTechController.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:CukTechController"
+             xmlns:v="clr-namespace:CukTechController.Views"
+             StartupUri="ui/Views/MainWindow.xaml">
+    <Application.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="ui/Themes/AppTheme.xaml" />
+            </ResourceDictionary.MergedDictionaries>
+            <!-- 全局值转换器 -->
+            <v:InvertBoolConverter x:Key="InvertBoolConv"/>
+            <v:StringToVisibilityConverter x:Key="StringToVis"/>
+            <v:BoolToConnTextConverter x:Key="BoolToConnText"/>
+            <v:BoolToOnOffConverter x:Key="BoolToOnOffConv"/>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

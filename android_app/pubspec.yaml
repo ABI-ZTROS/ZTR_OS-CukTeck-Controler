@@ -1,0 +1,32 @@
+name: cuktech_controller
+description: 酷态科 10 号超级电能充 Ultra 控制软件 (Android)
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+  flutter: '>=3.19.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_blue_plus: ^1.32.0
+  flutter_secure_storage: ^9.0.0
+  shared_preferences: ^2.2.2
+  pointycastle: ^1.0.1
+  cryptography: ^2.7.0
+  crypto: ^3.0.3
+  hex: ^0.2.0
+  http: ^1.1.0
+  path_provider: ^2.1.4
+  intl: ^0.19.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/

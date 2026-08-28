@@ -1,0 +1,15 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    - avoid_print
+    - prefer_const_constructors
+    - prefer_const_declarations
+    - require_trailing_commas
+    - sized_box_for_whitespace
+    - always_use_package_imports
+
+analyzer:
+  errors:
+    invalid_assignment: error
+    missing_return: error
