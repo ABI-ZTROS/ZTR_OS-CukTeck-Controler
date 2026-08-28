@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../utils/xiaomi_cloud/webview_login.dart' show XiaomiLoginController, LoginEvent;
-import '../../utils/logger/logger.dart';
 
 /// 米家云登录页面 —— 纯 HTTP 实现（无 WebView）
 ///
@@ -27,7 +26,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
   bool _obscurePassword = true;
   bool _isLoading = false;
   String? _errorMessage;
-  String? _maskedPhone;
   int? _countdown;
   Timer? _countdownTimer;
 

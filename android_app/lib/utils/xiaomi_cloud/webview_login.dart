@@ -90,8 +90,9 @@ class XiaomiLoginController {
   /// 把 response 的 Set-Cookie 头提取为 Map
   Map<String, String> _extractSetCookies(http.Response response) {
     final result = <String, String>{};
-    final headers = response.headers['set-cookie'] ?? <String>[];
-    for (final hdr in headers) {
+    final rawCookies = response.headers['set-cookie'] ?? '';
+    // http package joins multiple Set-Cookie with comma, split carefully
+    for (final hdr in rawCookies.split(', ')) {
       final match = RegExp(r'^([^=]+)=([^;]+)').firstMatch(hdr);
       if (match != null) {
         result[match.group(1)!] = match.group(2)!;
