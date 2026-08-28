@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("dev.flutter.flutter-gradle-plugin")
 }
 
 android {
@@ -17,7 +18,7 @@ android {
 
     defaultConfig {
         applicationId = "com.cuktech.controller"
-        minSdk = 24
+        minSdk = 23
         targetSdk = 34
         versionCode = 1
         versionName = "0.1.0"
@@ -26,6 +27,10 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+flutter {
+    source = "../.."
 }
 
 dependencies {

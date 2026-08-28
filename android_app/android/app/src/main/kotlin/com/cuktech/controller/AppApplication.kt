@@ -1,9 +1,9 @@
 package com.cuktech.controller
 
 import android.app.Application
-import io.flutter.app.FlutterApplication
 
 /**
- * Application 入口，保留为空但用于 manifest 正确指向
+ * Application 入口
+ * 仅保留为空实现用于 manifest 指向；Flutter 初始化由 Activity 处理
  */
-class AppApplication : FlutterApplication()
+class AppApplication : Application()
