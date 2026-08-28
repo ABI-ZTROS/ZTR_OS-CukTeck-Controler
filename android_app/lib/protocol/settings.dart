@@ -86,56 +86,56 @@ class SettingsService {
     return s;
   }
 
-  Future<int?> _read(AndroidConnector c, int piid) async {
+  Future<int?> read(AndroidConnector c, int piid) async {
     final resp = await _channel.sendGet(c, siidCharger, piid,
         seqProvider: () => _nextSeq);
     return resp?['value'] as int?;
   }
 
-  Future<bool> _write(AndroidConnector c, int piid, int value) async {
+  Future<bool> write(AndroidConnector c, int piid, int value) async {
     final resp = await _channel.sendSet(c, siidCharger, piid, value,
         seqProvider: () => _nextSeq);
     if (resp == null) return false;
     await Future<void>.delayed(const Duration(milliseconds: 300));
-    final rb = await _read(c, piid);
+    final rb = await read(c, piid);
     final ok = rb == value;
     AppLogger.instance.i('Settings', 'PIID $piid wrote=$value read=$rb OK=$ok');
     return ok;
   }
 
   // ---- 场景模式 PIID 5 ----
-  Future<int?> getSceneMode(AndroidConnector c) => _read(c, 5);
-  Future<bool> setSceneMode(AndroidConnector c, int mode) => _write(c, 5, mode);
+  Future<int?> getSceneMode(AndroidConnector c) => read(c, 5);
+  Future<bool> setSceneMode(AndroidConnector c, int mode) => write(c, 5, mode);
 
   // ---- 息屏时间 PIID 6 ----
-  Future<int?> getScreenOffTime(AndroidConnector c) => _read(c, 6);
-  Future<bool> setScreenOffTime(AndroidConnector c, int time) => _write(c, 6, time);
+  Future<int?> getScreenOffTime(AndroidConnector c) => read(c, 6);
+  Future<bool> setScreenOffTime(AndroidConnector c, int time) => write(c, 6, time);
 
   // ---- 总倒计时 PIID 8 ----
-  Future<int?> getGlobalTimer(AndroidConnector c) => _read(c, 8);
-  Future<bool> setGlobalTimer(AndroidConnector c, int minutes) => _write(c, 8, minutes);
+  Future<int?> getGlobalTimer(AndroidConnector c) => read(c, 8);
+  Future<bool> setGlobalTimer(AndroidConnector c, int minutes) => write(c, 8, minutes);
 
   // ---- 单端口倒计时 PIID 9-12 ----
   Future<int?> getPortTimer(AndroidConnector c, String port) =>
-      _read(c, timerPorts[port]!);
+      read(c, timerPorts[port]!);
   Future<bool> setPortTimer(AndroidConnector c, String port, int minutes) =>
-      _write(c, timerPorts[port]!, minutes);
+      write(c, timerPorts[port]!, minutes);
 
   // ---- 语言 PIID 13 ----
-  Future<int?> getLanguage(AndroidConnector c) => _read(c, 13);
-  Future<bool> setLanguage(AndroidConnector c, int lang) => _write(c, 13, lang);
+  Future<int?> getLanguage(AndroidConnector c) => read(c, 13);
+  Future<bool> setLanguage(AndroidConnector c, int lang) => write(c, 13, lang);
 
   // ---- USB-A 小电流 PIID 15 ----
   Future<bool> setUsbASmallCurrent(AndroidConnector c, bool on) =>
-      _write(c, 15, on ? 1 : 0);
+      write(c, 15, on ? 1 : 0);
 
   // ---- 空闲息屏 PIID 19 ----
   Future<bool> setIdleScreenOff(AndroidConnector c, bool on) =>
-      _write(c, 19, on ? 1 : 0);
+      write(c, 19, on ? 1 : 0);
 
   // ---- 屏幕方向锁 PIID 20 ----
   Future<bool> setScreenOrientationLock(AndroidConnector c, bool on) =>
-      _write(c, 20, on ? 1 : 0);
+      write(c, 20, on ? 1 : 0);
 
   // ---- 进入界面 PIID 14 (只写) ----
   Future<bool> gotoScreen(AndroidConnector c, int page) async {

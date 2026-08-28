@@ -110,7 +110,7 @@ class DeviceInfo {
       model: json['model'] as String? ?? '',
       serialNumber: json['serialNumber'] as String? ?? '',
       firmwareVersion: json['firmwareVersion'] as String? ?? '',
-      productId: json['productId'] as int? ?? productId,
+      productId: json['productId'] as int? ?? 0x660e,
       hardwareVersion: json['hardwareVersion'] as String? ?? '',
     );
   }

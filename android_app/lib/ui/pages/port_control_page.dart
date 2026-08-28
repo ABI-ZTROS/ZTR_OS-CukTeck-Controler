@@ -46,7 +46,7 @@ class _PortControlPageState extends State<PortControlPage> {
       }
       final timerPiid = timerPorts[_portKey];
       if (timerPiid != null) {
-        final min = await _settings._read(_connector, timerPiid);
+        final min = await _settings.read(_connector, timerPiid);
         if (min != null) setState(() => _countdownMinutes = min);
       }
     } catch (e) {

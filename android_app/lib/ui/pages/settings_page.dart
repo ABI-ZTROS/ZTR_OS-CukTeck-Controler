@@ -29,13 +29,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     try {
-      final vals = await Future.wait([
+      final vals = await Future.wait<int?>([
         _settings.getSceneMode(_connector),
         _settings.getScreenOffTime(_connector),
-        _settings._read(_connector, 13),
-        _settings._read(_connector, 15),
-        _settings._read(_connector, 19),
-        _settings._read(_connector, 20),
+        _settings.read(_connector, 13),
+        _settings.read(_connector, 15),
+        _settings.read(_connector, 19),
+        _settings.read(_connector, 20),
       ]);
       setState(() {
         _sceneMode = vals[0] ?? 1;
@@ -74,7 +74,7 @@ class _SettingsPageState extends State<SettingsPage> {
             '语言',
             _language,
             const {0: 'English', 1: '中文'},
-            (v) => _settings._write(_connector, 13, v!),
+            (v) => _settings.write(_connector, 13, v!),
             (v) => setState(() => _language = v!),
           ),
           _buildSwitch(
