@@ -7,9 +7,9 @@ class WebviewLoginPage extends StatefulWidget {
   final Function(String serviceToken, String ssecurity) onLoginSuccess;
 
   const WebviewLoginPage({
-    Key? key,
+    super.key,
     required this.onLoginSuccess,
-  }) : super(key: key);
+  });
 
   @override
   State<WebviewLoginPage> createState() => _WebviewLoginPageState();
@@ -49,7 +49,7 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
   Future<void> _clearCookiesAndReload() async {
     try {
       // 清除旧 cookies 重新开始
-      await CookieManager.instance.clearCookies();
+      await _webController?.clearCache();
       await _webController?.reload();
     } catch (e) {
       AppLogger.instance.w('WebviewLoginPage', 'Clear cookies failed: $e');
@@ -73,48 +73,40 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
         children: [
           InAppWebView(
             initialUrlRequest: URLRequest(
-              url: Uri.parse('https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true'),
+              url: WebUri('https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true'),
             ),
-            initialOptions: InAppWebViewGroupOptions(
-              crossPlatform: InAppWebViewOptions(
-                useShouldOverrideUrlLoading: true,
-                mediaPlaybackRequiresUserGesture: false,
-                clearCache: true,
-                clearSharedData: true,
-              ),
-              android: InAppWebViewAndroidOptions(
-                safeBrowsingEnabled: false,
-              ),
+            initialSettings: InAppWebViewSettings(
+              useShouldOverrideUrlLoading: true,
+              mediaPlaybackRequiresUserGesture: false,
+              clearCache: true,
+              clearSharedData: true,
             ),
             onWebViewCreated: (controller) {
               _webController = controller;
               AppLogger.instance.i('WebviewLoginPage', 'WebView created');
             },
-            onLoadStart: (_controller, url) {
+            onLoadStart: (controller, url) {
               setState(() {
                 _isLoading = true;
                 _errorMessage = null;
               });
             },
-            onLoadStop: (_controller, url) async {
+            onLoadStop: (controller, url) async {
               setState(() => _isLoading = false);
               if (url != null) {
-                await _controller.onLoadStop(url);
+                await _controller.onLoadStop(controller, url.toString());
               }
             },
             shouldOverrideUrlLoading: (controller, navigationAction) async {
               final policy = await _controller.onNavigation(navigationAction);
               return policy;
             },
-            onLoadError: (_controller, url, code, message) {
-              AppLogger.instance.e('WebviewLoginPage', 'Load error: $code $message');
+            onReceivedError: (controller, url, error) {
+              AppLogger.instance.e('WebviewLoginPage', 'Received error: ${error.description}');
               setState(() {
                 _isLoading = false;
-                _errorMessage = '加载失败: $message (错误码: $code)';
+                _errorMessage = '加载失败: ${error.description}';
               });
-            },
-            onReceivedError: (_controller, url, error) {
-              AppLogger.instance.e('WebviewLoginPage', 'Received error: ${error.description}');
             },
           ),
           if (_isLoading)

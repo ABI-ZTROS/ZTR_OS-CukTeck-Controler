@@ -8,8 +8,8 @@ import '../logger/logger.dart';
 /// 流程：
 /// 1. 打开 https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true
 /// 2. 用户完成登录后，WebView 重定向到 sts.api.io.mi.com
-/// 3. 从重定向 URL 的 cookies 中提取 serviceToken
-/// 4. 从第一步响应中提取 ssecurity
+/// 3. 从重定向 URL 的参数中提取 serviceToken
+/// 4. 从 WebView cookies 中提取 ssecurity
 class WebviewLoginController {
   final StreamController<LoginEvent> _controller = StreamController.broadcast();
 
@@ -32,19 +32,18 @@ class WebviewLoginController {
     _controller.add(LoginEvent.success(serviceToken!, ssecurity!));
   }
 
-  /// 从指定 URL 的 cookies 中提取凭据
-  Future<void> _extractCookies(String url) async {
+  /// 从 cookies 中提取凭据 (通过 InAppWebViewController)
+  Future<void> _extractCookies(InAppWebViewController webController) async {
     try {
-      final uri = Uri.parse(url);
-      final cookies = await CookieManager.instance.getCookies(url: uri);
+      final cookies = await webController.getCookies();
       for (final cookie in cookies) {
         if (cookie.name == 'serviceToken' && serviceToken == null) {
           serviceToken = cookie.value;
-          AppLogger.instance.d('WebviewLogin', 'Found serviceToken in $url');
+          AppLogger.instance.d('WebviewLogin', 'Found serviceToken');
         }
         if (cookie.name == 'ssecurity' && ssecurity == null) {
           ssecurity = cookie.value;
-          AppLogger.instance.d('WebviewLogin', 'Found ssecurity in $url');
+          AppLogger.instance.d('WebviewLogin', 'Found ssecurity');
         }
         if (cookie.name == 'userId' && userId == null) {
           userId = cookie.value;
@@ -55,7 +54,7 @@ class WebviewLoginController {
         _emitSuccess();
       }
     } catch (e) {
-      AppLogger.instance.w('WebviewLogin', 'Cookie extraction failed for $url: $e');
+      AppLogger.instance.w('WebviewLogin', 'Cookie extraction failed: $e');
     }
   }
 
@@ -67,45 +66,21 @@ class WebviewLoginController {
     // 检测 sts.api.io.mi.com 重定向 → 登录成功
     if (url.contains('sts.api.io.mi.com')) {
       // 尝试从 URL query/fragment 中获取 serviceToken
-      final uri = Uri.parse(url);
-      final params = uri.queryParameters;
-      if (params.containsKey('serviceToken')) {
-        serviceToken = params['serviceToken'];
+      if (action.request.url != null) {
+        final params = action.request.url!.queryParameters;
+        if (params.containsKey('serviceToken')) {
+          serviceToken = params['serviceToken'];
+        }
       }
-      // 同时从 cookies 提取
-      await _extractCookies('https://sts.api.io.mi.com');
-      if (serviceToken != null && ssecurity != null) {
-        _emitSuccess();
-      }
-    }
-
-    // 检测 account.xiaomi.com 登录页 → 提取 ssecurity
-    if (url.contains('account.xiaomi.com/pass/serviceLogin') ||
-        url.contains('account.xiaomi.com/pass/serviceLoginAuth2')) {
-      await _extractCookies(url);
     }
 
     return NavigationActionPolicy.ALLOW;
   }
 
-  /// 处理页面加载完成
-  Future<void> onLoadStop(String url) async {
+  /// 页面加载完成后提取 cookies
+  Future<void> onLoadStop(InAppWebViewController webController, String url) async {
     AppLogger.instance.d('WebviewLogin', 'Page loaded: $url');
-
-    // 从多个可能的域名提取凭据
-    final urls = <String>[
-      'https://account.xiaomi.com',
-      'https://sts.api.io.mi.com',
-      url, // 当前页面 URL
-    ];
-
-    for (final checkUrl in urls) {
-      await _extractCookies(checkUrl);
-      if (serviceToken != null && ssecurity != null) {
-        _emitSuccess();
-        break;
-      }
-    }
+    await _extractCookies(webController);
   }
 
   void dispose() {

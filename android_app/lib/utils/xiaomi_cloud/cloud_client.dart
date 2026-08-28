@@ -69,11 +69,11 @@ class XiaomiCloudClient {
   ) async {
     final millis = DateTime.now().millisecondsSinceEpoch;
     final nonce = generateNonce(millis);
-    final signedNonce = signedNonce(_ssecurity, nonce);
+    final sNonce = signedNonce(_ssecurity, nonce);
     final encParams = generateEncParams(
       url: url,
       method: 'POST',
-      signedNonce: signedNonce,
+      signedNonce: sNonce,
       nonce: nonce,
       params: params,
       ssecurity: _ssecurity,
@@ -107,10 +107,9 @@ class XiaomiCloudClient {
               .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
               .join('&');
 
-        final response = await _httpClient.send(
-          request,
-          const Duration(seconds: 5),
-        );
+        final response = await _httpClient.send(request).timeout(
+              const Duration(seconds: 5),
+            );
 
         if (response.statusCode == 200) {
           final responseBody = await response.stream.bytesToString();
@@ -171,8 +170,9 @@ class XiaomiCloudClient {
     if (homes?['code'] == 0) {
       final homelist = homes!['result']?['homelist'] as List? ?? [];
       for (final home in homelist) {
-        final homeId = (home as Map)['id'] as String? ?? '';
-        final homeOwner = home['uid'] as String? ?? _userId;
+        final homeMap = home as Map;
+        final homeId = homeMap['id'] as String? ?? '';
+        final homeOwner = homeMap['uid'] as String? ?? _userId;
 
         final homeData = await _apiCall('$url/v2/home/home_device_list', {
           'data': jsonEncode({
