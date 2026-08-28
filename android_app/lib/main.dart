@@ -34,4 +34,4 @@ class CukTechControllerApp extends StatelessWidget {
       home: const HomePage(),
     );
   }
-}
+}// trigger rebuild
