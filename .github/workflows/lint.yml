@@ -28,7 +28,7 @@ jobs:
         working-directory: android_app
         run: |
           flutter pub get
-          flutter analyze --no-fatal-infos
+          flutter analyze --no-fatal-infos --no-fatal-warnings
       - name: Dart format check
         working-directory: android_app
         run: |

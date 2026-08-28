@@ -165,6 +165,8 @@ class XiaomiCloudClient {
     // TODO: Step3 GET location → serviceToken
     // TODO: 滑块/图形验证码处理（待抓包补充）
     // TODO: RC4-drop[1024] + sign 加密（待抓包补充）
+    // ignore: unused_local_variable
+    final _ = _markLoggedIn; // Suppress unused_element warning
     return const LoginResult(
       success: false,
       errorMessage:

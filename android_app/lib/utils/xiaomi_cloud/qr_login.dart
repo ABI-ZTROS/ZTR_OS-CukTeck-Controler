@@ -62,7 +62,7 @@ class QrLoginSession {
       // TODO: 待抓包补充 serviceToken 获取逻辑
       // 参考：扫码确认后需 GET location 回调 URL，解析 serviceToken。
       throw UnimplementedError('complete TODO: 待抓包补充');
-    } catch (e, stackTrace) {
+    } catch (e) {
       AppLogger.instance.e('QrLoginSession', 'complete failed: $e');
       return LoginResult(
         success: false,
