@@ -52,6 +52,10 @@ public class SettingsViewModel : INotifyPropertyChanged
     private bool _screenOrientationLock;
     public bool ScreenOrientationLock { get => _screenOrientationLock; set { _screenOrientationLock = value; OnPropertyChanged(); } }
 
+    // ---- PIID 8: 总倒计时 ----
+    private int _globalTimer;
+    public int GlobalTimer { get => _globalTimer; set { _globalTimer = value; OnPropertyChanged(); } }
+
     // ---- 状态 ----
     private bool _isLoading;
     private string _errorMessage = string.Empty;
@@ -86,6 +90,7 @@ public class SettingsViewModel : INotifyPropertyChanged
                 LoadBoolAsync(v => UsbASmallCurrent = v, 15),
                 LoadBoolAsync(v => IdleScreenOff = v, 19),
                 LoadBoolAsync(v => ScreenOrientationLock = v, 20),
+                LoadIntAsync(v => GlobalTimer = v, 8),
             };
             await Task.WhenAll(tasks);
         }
@@ -138,6 +143,7 @@ public class SettingsViewModel : INotifyPropertyChanged
                 _settings.SetUsbASmallCurrentAsync(_connector, UsbASmallCurrent),
                 _settings.SetIdleScreenOffAsync(_connector, IdleScreenOff),
                 _settings.SetScreenOrientationLockAsync(_connector, ScreenOrientationLock),
+                _settings.SetGlobalTimerAsync(_connector, GlobalTimer),
             };
             await Task.WhenAll(tasks);
             AppLogger.Info("Settings saved successfully");

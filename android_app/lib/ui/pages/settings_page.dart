@@ -20,6 +20,7 @@ class _SettingsPageState extends State<SettingsPage> {
   int _usbSmallCurrent = 0;
   int _idleScreenOff = 0;
   int _screenOrientationLock = 0;
+  int _globalTimer = 0;
 
   @override
   void initState() {
@@ -36,6 +37,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _settings.read(_connector, 15),
         _settings.read(_connector, 19),
         _settings.read(_connector, 20),
+        _settings.getGlobalTimer(_connector),
       ]);
       setState(() {
         _sceneMode = vals[0] ?? 1;
@@ -44,6 +46,7 @@ class _SettingsPageState extends State<SettingsPage> {
         _usbSmallCurrent = vals[3] ?? 0;
         _idleScreenOff = vals[4] ?? 0;
         _screenOrientationLock = vals[5] ?? 0;
+        _globalTimer = vals[6] ?? 0;
       });
     } catch (e) {
       // 未连接时保持默认值
@@ -95,6 +98,7 @@ class _SettingsPageState extends State<SettingsPage> {
             (on) => _settings.setScreenOrientationLock(_connector, on),
             (on) => setState(() => _screenOrientationLock = on ? 1 : 0),
           ),
+          _buildGlobalTimer(),
         ],
       ),
     );
@@ -136,6 +140,30 @@ class _SettingsPageState extends State<SettingsPage> {
           onLocal(v);
           await onSave(v);
         },
+      ),
+    );
+  }
+
+  Widget _buildGlobalTimer() {
+    return ListTile(
+      title: const Text('总倒计时 (分钟)'),
+      subtitle: const Text('设置所有端口的总倒计时时间，0 表示关闭'),
+      trailing: SizedBox(
+        width: 80,
+        child: TextFormField(
+          initialValue: _globalTimer.toString(),
+          keyboardType: TextInputType.number,
+          textAlign: TextAlign.right,
+          decoration: const InputDecoration(
+            border: OutlineInputBorder(),
+            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          ),
+          onFieldSubmitted: (v) async {
+            final min = int.tryParse(v) ?? 0;
+            await _settings.setGlobalTimer(_connector, min);
+            setState(() => _globalTimer = min);
+          },
+        ),
       ),
     );
   }

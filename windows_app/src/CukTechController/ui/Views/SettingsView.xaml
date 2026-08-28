@@ -72,6 +72,24 @@
                 </StackPanel>
             </Border>
 
+            <!-- PIID 8: 总倒计时 -->
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel>
+                    <TextBlock Text="总倒计时 (分钟)" FontWeight="Bold"
+                               Foreground="{StaticResource TextPrimaryBrush}"/>
+                    <TextBlock Text="设置所有端口的总倒计时时间，0 表示关闭"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               FontSize="12" Margin="0,4,0,0"/>
+                    <TextBox Text="{Binding GlobalTimer, UpdateSourceTrigger=PropertyChanged}"
+                             Width="80" Padding="8,4"
+                             HorizontalAlignment="Left"
+                             Background="{StaticResource BackgroundBrush}"
+                             Foreground="{StaticResource TextPrimaryBrush}"
+                             BorderBrush="{StaticResource DisconnectedBrush}"
+                             Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+
             <!-- 错误提示 -->
             <TextBlock Text="{Binding ErrorMessage}"
                        Foreground="{StaticResource ErrorBrush}"
