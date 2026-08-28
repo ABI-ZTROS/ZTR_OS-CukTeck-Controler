@@ -59,9 +59,9 @@ class XiaomiCloudClient {
   /// 生成模拟 Android User-Agent
   String _buildAgent() {
     final rand = Random();
-    final suffix = String.fromCharCode(
-      List.generate(11, (_) => rand.nextInt(26) + 65) +
-          List.generate(6, (_) => rand.nextInt(26) + 65),
+    final suffix = String.fromCharCodes(
+      [...List.generate(11, (_) => rand.nextInt(26) + 65),
+       ...List.generate(6, (_) => rand.nextInt(26) + 65)],
     );
     return 'Android-7.1.1-1.0.0-ONEPLUS A3010-136-$suffix MIIO/';
   }
@@ -69,8 +69,8 @@ class XiaomiCloudClient {
   /// 生成随机 16 位设备 ID
   String _buildDeviceId() {
     final rand = Random();
-    return String.fromCharCode(
-      List.generate(16, (_) => rand.nextInt(10) + 48),
+    return String.fromCharCodes(
+      [...List.generate(16, (_) => rand.nextInt(10) + 48)],
     );
   }
 
@@ -99,7 +99,7 @@ class XiaomiCloudClient {
   /// GET `https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true`
   Future<LoginResult> _loginStep1(String username) async {
     final url = Uri.parse(
-      'https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true',
+      'https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=true&userId=${Uri.encodeQueryComponent(username)}',
     );
     final headers = <String, String>{
       'User-Agent': _buildAgent(),
@@ -109,10 +109,9 @@ class XiaomiCloudClient {
       final response = await _httpClient.get(
         url,
         headers: headers,
-        queryParameters: <String, String>{'userId': username},
       );
       if (response.statusCode != 200) {
-        return const LoginResult(
+        return LoginResult(
           success: false,
           errorMessage: '网络错误 Step1 (HTTP ${response.statusCode})',
         );
