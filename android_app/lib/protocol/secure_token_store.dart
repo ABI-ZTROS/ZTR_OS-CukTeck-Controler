@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
@@ -182,11 +183,12 @@ class SecureTokenStore {
       final dir = await getTemporaryDirectory();
       final ts = DateTime.now().millisecondsSinceEpoch;
       final path = '${dir.path}/cuk_cloud_$ts.cuk';
-      final file = XFile(path);
+      final file = File(path);
       await file.writeAsString(json);
 
-      await Share.shareXFiles(
-        [file],
+      // share_plus 7.x API: Share.shareFiles(List<String>)
+      await Share.shareFiles(
+        [path],
         text: '酷态科云凭证 — 可直接在 Windows 端导入使用',
         subject: 'CUKTECH Cloud Credentials',
       );
