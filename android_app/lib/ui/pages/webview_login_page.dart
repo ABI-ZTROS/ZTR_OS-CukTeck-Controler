@@ -24,8 +24,7 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
   bool _extracting = false;
   String? _error;
 
-  // 登录入口：让 WebView 拿到 HTML 登录页 → 用户登录 → 重定向到 sts.api.io.mi.com
-  // 注意：初始加载不带 _json=true，否则服务器返回 JSON 字符串而不是浏览器登录页
+  // 登录入口 —— 不带 _json=true，让服务器返回 HTML 登录页
   late final Uri _loginUrl = Uri.parse(
     'https://account.xiaomi.com/pass/serviceLogin'
     '?sid=xiaomiio'
@@ -47,23 +46,22 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
               domStorageEnabled: true,
               cacheEnabled: true,
             ),
-            initialUrlRequest: URLRequest(url: WebUri.uriValue(_loginUrl)),
+            initialUrlRequest: URLRequest(url: WebUri(_loginUrl.toString())),
             onWebViewCreated: (ctrl) => _webCtrl = ctrl,
-            onLoadStart: (_) => setState(() {
+            onLoadStart: (_, __) => setState(() {
               _isLoading = true;
               _error = null;
             }),
             onLoadStop: (_, url) async {
               setState(() => _isLoading = false);
-              if (url != null && url.toString().contains('sts.api.io.mi.com')) {
+              final urlStr = url?.toString() ?? '';
+              if (urlStr.contains('sts.api.io.mi.com')) {
                 await _extractTokens();
               }
             },
             shouldOverrideUrlLoading: (_, action) async {
               final url = action.request.url?.toString() ?? '';
-              // sts.api.io.mi.com = 登录完成信号
               if (url.contains('sts.api.io.mi.com')) {
-                // 等 cookies 落盘后再提取
                 await Future.delayed(const Duration(milliseconds: 500));
                 await _extractTokens();
                 return NavigationActionPolicy.CANCEL;
@@ -71,8 +69,9 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
               return NavigationActionPolicy.ALLOW;
             },
             onReceivedError: (_, req, err) {
-              // 忽略主框架以外的资源错误
-              if (req.isForMainFrame) {
+              final isMain = req != null &&
+                  (req.isForMainFrame ?? true);
+              if (isMain) {
                 setState(() => _error = err.description);
               }
             },
@@ -81,7 +80,7 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
             const Center(child: CircularProgressIndicator()),
           if (_extracting)
             Container(
-              color: Colors.black66,
+              color: Colors.black.withOpacity(0.7),
               child: const Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -114,7 +113,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
     setState(() => _extracting = true);
 
     try {
-      // 1. 从 WebView CookieManager 读 cookies（account.xiaomi.com）
       final cookies = await CookieManager.instance()
           .getCookies(url: WebUri('https://account.xiaomi.com'));
 
@@ -141,7 +139,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
         return;
       }
 
-      // 2. ssecurity 不在 cookie 里 —— 通过 JS fetch() 调 serviceLogin 拿
       final ssecurity = await _fetchSsecurity();
 
       if (!mounted) return;
@@ -165,7 +162,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
     }
   }
 
-  /// 通过 JS fetch('/pass/serviceLogin', credentials:'include') 拿 ssecurity
   Future<String> _fetchSsecurity() async {
     final result = await _webCtrl?.evaluateJavascript(source: '''
 (function() {
@@ -190,7 +186,6 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
 
     debugPrint('📡 JS fetch raw (first 200): ${text.substring(0, text.length > 200 ? 200 : text.length)}');
 
-    // 剥离 &&&START&&& / &&&END&&&
     var body = text;
     if (body.startsWith('&&&START&&&')) body = body.substring(11);
     if (body.endsWith('&&&END&&&')) body = body.substring(0, body.length - 9);
