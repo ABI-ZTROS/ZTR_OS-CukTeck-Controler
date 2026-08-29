@@ -1,271 +1,214 @@
-import 'dart:async';
-import 'package:flutter/material.dart';
-import '../../utils/xiaomi_cloud/webview_login.dart' show XiaomiLoginController, LoginEvent;
+import 'dart:convert';
 
-/// 米家云登录页面 —— 纯 HTTP 实现（无 WebView）
+import 'package:flutter/material.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+
+/// 米家云登录页面 —— WebView 全流程
 ///
-/// 流程：用户名 + 密码 → HTTP serviceLoginAuth2 → 2FA 验证码对话框 → 完成
+/// 用户在 WebView 里完整走完浏览器登录（密码 + OTP），
+/// 登录成功后：
+///   1. 从 CookieManager 提取 cookies → 拿到 serviceToken / userId
+///   2. 通过 JS fetch() 调 serviceLogin（带 credentials:include）→ 拿到 ssecurity
 class WebviewLoginPage extends StatefulWidget {
   final Function(String serviceToken, String ssecurity, String userId) onLoginSuccess;
 
-  const WebviewLoginPage({
-    super.key,
-    required this.onLoginSuccess,
-  });
+  const WebviewLoginPage({super.key, required this.onLoginSuccess});
 
   @override
   State<WebviewLoginPage> createState() => _WebviewLoginPageState();
 }
 
 class _WebviewLoginPageState extends State<WebviewLoginPage> {
-  final XiaomiLoginController _controller = XiaomiLoginController();
-  final TextEditingController _usernameCtrl = TextEditingController();
-  final TextEditingController _passwordCtrl = TextEditingController();
-  final TextEditingController _codeCtrl = TextEditingController();
+  InAppWebViewController? _webCtrl;
+  bool _isLoading = true;
+  bool _extracting = false;
+  String? _error;
 
-  bool _obscurePassword = true;
-  bool _isLoading = false;
-  String? _errorMessage;
-  int? _countdown;
-  Timer? _countdownTimer;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.events.listen(_onLoginEvent);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    _usernameCtrl.dispose();
-    _passwordCtrl.dispose();
-    _codeCtrl.dispose();
-    _countdownTimer?.cancel();
-    super.dispose();
-  }
-
-  void _onLoginEvent(LoginEvent event) {
-    if (!mounted) return;
-    setState(() {
-      _isLoading = !event.isSuccess && event.errorMessage == null && !event.needCode;
-      _errorMessage = event.errorMessage;
-    });
-
-    if (event.needCode && event.phone != null) {
-      _showCodeDialog(event.phone!, event.countdown ?? 180);
-    }
-
-    if (event.isSuccess) {
-      _countdownTimer?.cancel();
-      _countdownTimer = null;
-      widget.onLoginSuccess(event.serviceToken!, event.ssecurity!, event.userId!);
-    }
-  }
-
-  Future<void> _submitLogin() async {
-    final username = _usernameCtrl.text.trim();
-    final password = _passwordCtrl.text;
-    if (username.isEmpty || password.isEmpty) {
-      setState(() => _errorMessage = '请输入用户名和密码');
-      return;
-    }
-    setState(() {
-      _errorMessage = null;
-      _isLoading = true;
-    });
-    await _controller.login(username: username, password: password);
-  }
-
-  void _showCodeDialog(String phone, int seconds) {
-    _countdown = seconds;
-    _countdownTimer?.cancel();
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_countdown != null) {
-        setState(() {
-          _countdown = _countdown! - 1;
-          if (_countdown! <= 0) {
-            _countdownTimer?.cancel();
-            _countdown = null;
-          }
-        });
-      }
-    });
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text('输入验证码'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('验证码已发送到 $phone'),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _codeCtrl,
-              keyboardType: TextInputType.number,
-              maxLength: 6,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 24, letterSpacing: 8),
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: '6位验证码',
-              ),
-              onSubmitted: (_) => _submitCode(),
-            ),
-            if (_countdown != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  '剩余 $_countdown 秒',
-                  style: TextStyle(
-                    color: _countdown! > 30 ? Colors.green : Colors.red,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
-          ),
-          ElevatedButton(
-            onPressed: _isLoading ? null : _submitCode,
-            child: _isLoading
-                ? const SizedBox(
-                    width: 16, height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Text('确认'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _submitCode() async {
-    final code = _codeCtrl.text.trim();
-    if (code.length != 6) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入6位验证码')),
-      );
-      return;
-    }
-    Navigator.pop(context);
-    setState(() => _isLoading = true);
-    await _controller.submitCode(code);
-  }
+  // 登录入口：让 WebView 拿到 HTML 登录页 → 用户登录 → 重定向到 sts.api.io.mi.com
+  // 注意：初始加载不带 _json=true，否则服务器返回 JSON 字符串而不是浏览器登录页
+  late final Uri _loginUrl = Uri.parse(
+    'https://account.xiaomi.com/pass/serviceLogin'
+    '?sid=xiaomiio'
+    '&callback=https%3A%2F%2Fsts.api.io.mi.com%2Fsts'
+    '&cc=%2B86',
+  );
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('米家云登录')),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              '输入米家账号和密码',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+      body: Stack(
+        children: [
+          InAppWebView(
+            initialSettings: InAppWebViewSettings(
+              useShouldOverrideUrlLoading: true,
+              mediaPlaybackRequiresUserGesture: false,
+              javaScriptEnabled: true,
+              domStorageEnabled: true,
+              cacheEnabled: true,
             ),
-            const SizedBox(height: 8),
-            const Text(
-              '登录成功后将自动获取设备 beaconKey（BLE Token）',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
-            ),
-            const SizedBox(height: 24),
-            TextField(
-              controller: _usernameCtrl,
-              decoration: const InputDecoration(
-                labelText: '手机号/邮箱',
-                prefixIcon: Icon(Icons.person),
-                border: OutlineInputBorder(),
-              ),
-              keyboardType: TextInputType.phone,
-              textInputAction: TextInputAction.next,
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _passwordCtrl,
-              obscureText: _obscurePassword,
-              decoration: InputDecoration(
-                labelText: '密码',
-                prefixIcon: const Icon(Icons.lock),
-                suffixIcon: IconButton(
-                  icon: Icon(_obscurePassword
-                      ? Icons.visibility_off
-                      : Icons.visibility),
-                  onPressed: () => setState(
-                      () => _obscurePassword = !_obscurePassword),
-                ),
-                border: const OutlineInputBorder(),
-              ),
-              textInputAction: TextInputAction.done,
-              onSubmitted: (_) => _submitLogin(),
-            ),
-            if (_errorMessage != null) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade100,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
+            initialUrlRequest: URLRequest(url: WebUri.uriValue(_loginUrl)),
+            onWebViewCreated: (ctrl) => _webCtrl = ctrl,
+            onLoadStart: (_) => setState(() {
+              _isLoading = true;
+              _error = null;
+            }),
+            onLoadStop: (_, url) async {
+              setState(() => _isLoading = false);
+              if (url != null && url.toString().contains('sts.api.io.mi.com')) {
+                await _extractTokens();
+              }
+            },
+            shouldOverrideUrlLoading: (_, action) async {
+              final url = action.request.url?.toString() ?? '';
+              // sts.api.io.mi.com = 登录完成信号
+              if (url.contains('sts.api.io.mi.com')) {
+                // 等 cookies 落盘后再提取
+                await Future.delayed(const Duration(milliseconds: 500));
+                await _extractTokens();
+                return NavigationActionPolicy.CANCEL;
+              }
+              return NavigationActionPolicy.ALLOW;
+            },
+            onReceivedError: (_, req, err) {
+              // 忽略主框架以外的资源错误
+              if (req.isForMainFrame) {
+                setState(() => _error = err.description);
+              }
+            },
+          ),
+          if (_isLoading && !_extracting)
+            const Center(child: CircularProgressIndicator()),
+          if (_extracting)
+            Container(
+              color: Colors.black66,
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.error, color: Colors.red),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(_errorMessage!,
-                          style: const TextStyle(color: Colors.red)),
-                    ),
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 12),
+                    Text('正在提取登录凭据...',
+                        style: TextStyle(color: Colors.white, fontSize: 16)),
                   ],
                 ),
               ),
-            ],
-            const SizedBox(height: 24),
-            SizedBox(
-              height: 48,
-              child: ElevatedButton(
-                onPressed: _isLoading ? null : _submitLogin,
-                child: _isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
-                      )
-                    : const Text('登录'),
+            ),
+          if (_error != null)
+            Positioned(
+              top: 0, left: 0, right: 0,
+              child: Container(
+                color: Colors.red.shade700,
+                padding: const EdgeInsets.all(8),
+                child: Text('加载错误: $_error',
+                    style: const TextStyle(color: Colors.white)),
               ),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.info, color: Colors.blue, size: 16),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      '登录凭据仅保存在设备本地安全存储中，不会上传到任何服务器。',
-                      style: TextStyle(color: Colors.blue, fontSize: 12),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        ],
       ),
     );
+  }
+
+  Future<void> _extractTokens() async {
+    if (_extracting || _webCtrl == null) return;
+    setState(() => _extracting = true);
+
+    try {
+      // 1. 从 WebView CookieManager 读 cookies（account.xiaomi.com）
+      final cookies = await CookieManager.instance()
+          .getCookies(url: WebUri('https://account.xiaomi.com'));
+
+      final cookieMap = <String, String>{};
+      for (final c in cookies) {
+        if (c.name != null && c.value != null) {
+          cookieMap[c.name!] = c.value!;
+        }
+      }
+
+      final serviceToken = cookieMap['serviceToken'] ?? '';
+      final userId = cookieMap['userId'] ?? '';
+
+      debugPrint('📋 WebView cookies (${cookieMap.length}): ${cookieMap.keys.join(", ")}');
+      debugPrint('🔑 serviceToken=${serviceToken.isNotEmpty ? serviceToken.substring(0, serviceToken.length > 12 ? 12 : serviceToken.length) + "..." : "MISSING"}');
+      debugPrint('👤 userId=$userId');
+
+      if (serviceToken.isEmpty || userId.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('未检测到登录凭据，请确认已完成登录')),
+        );
+        setState(() => _extracting = false);
+        return;
+      }
+
+      // 2. ssecurity 不在 cookie 里 —— 通过 JS fetch() 调 serviceLogin 拿
+      final ssecurity = await _fetchSsecurity();
+
+      if (!mounted) return;
+
+      if (ssecurity.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('ssecurity 获取失败，请重试')),
+        );
+        setState(() => _extracting = false);
+        return;
+      }
+
+      widget.onLoginSuccess(serviceToken, ssecurity, userId);
+    } catch (e) {
+      debugPrint('❌ Extract error: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('提取失败: $e')),
+      );
+      setState(() => _extracting = false);
+    }
+  }
+
+  /// 通过 JS fetch('/pass/serviceLogin', credentials:'include') 拿 ssecurity
+  Future<String> _fetchSsecurity() async {
+    final result = await _webCtrl?.evaluateJavascript(source: '''
+(function() {
+  return fetch('/pass/serviceLogin?sid=xiaomiio&_json=true&cc=%2B86', {
+    credentials: 'include',
+    headers: {'Accept': 'application/json, text/plain, */*'}
+  }).then(function(r) { return r.text(); })
+    .catch(function(e) { return 'ERR:' + e.message; });
+})()
+''');
+
+    if (result == null) {
+      debugPrint('❌ evaluateJavascript returned null');
+      return '';
+    }
+
+    final text = result.toString();
+    if (text.startsWith('ERR:')) {
+      debugPrint('❌ JS fetch error: $text');
+      return '';
+    }
+
+    debugPrint('📡 JS fetch raw (first 200): ${text.substring(0, text.length > 200 ? 200 : text.length)}');
+
+    // 剥离 &&&START&&& / &&&END&&&
+    var body = text;
+    if (body.startsWith('&&&START&&&')) body = body.substring(11);
+    if (body.endsWith('&&&END&&&')) body = body.substring(0, body.length - 9);
+
+    try {
+      final map = jsonDecode(body) as Map<String, dynamic>;
+      final ssec = map['ssecurity']?.toString() ?? '';
+      debugPrint('${ssec.isNotEmpty ? "✅" : "❌"} ssecurity: ${ssec.isNotEmpty ? ssec.substring(0, ssec.length > 12 ? 12 : ssec.length) + "..." : "NOT FOUND in response"}');
+      return ssec;
+    } catch (e) {
+      debugPrint('❌ JSON parse error: $e');
+      return '';
+    }
+  }
+
+  @override
+  void dispose() {
+    _webCtrl?.dispose();
+    super.dispose();
   }
 }
