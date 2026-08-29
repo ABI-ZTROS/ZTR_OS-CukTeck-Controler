@@ -115,14 +115,13 @@ class XiaomiLoginController {
   /// 合并 cookies（保留已有 + 添加新的）
   final Map<String, String> _sessionCookies = {};
 
+  /// ⚠️ 关键：sdkVersion cookie — 标记请求来自 MI SDK，让服务器返回 ssecurity 而不是 psecurity
+  static const String _sdkVersion = 'accountsdk-18.8.15';
+
   Future<http.Response> _get(String url, {Map<String, String>? params}) async {
     final uri = Uri.parse(url).replace(queryParameters: params);
     final headers = <String, String>{'User-Agent': _agent};
-    if (_sessionCookies.isNotEmpty) {
-      headers['Cookie'] = _sessionCookies.entries
-          .map((e) => '${e.key}=${e.value}')
-          .join('; ');
-    }
+    headers['Cookie'] = _buildCookieHeader();
     AppLogger.instance.d('XiaomiLogin',
         'GET ${uri.path} cookies=[${_sessionCookies.keys.join(",")}]');
     final resp = await _httpClient.get(uri, headers: headers);
@@ -138,11 +137,7 @@ class XiaomiLoginController {
       'User-Agent': _agent,
       'Content-Type': 'application/x-www-form-urlencoded',
     };
-    if (_sessionCookies.isNotEmpty) {
-      headers['Cookie'] = _sessionCookies.entries
-          .map((e) => '${e.key}=${e.value}')
-          .join('; ');
-    }
+    headers['Cookie'] = _buildCookieHeader();
     final body = params?.entries
         .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
         .join('&') ?? '';
@@ -153,6 +148,35 @@ class XiaomiLoginController {
     AppLogger.instance.d('XiaomiLogin',
         '  ↳ ${resp.statusCode}, body=${resp.body.substring(0, resp.body.length > 300 ? 300 : resp.body.length)}');
     return resp;
+  }
+
+  /// 构建 Cookie header（始终包含 sdkVersion，它是跨域 cookie）
+  String _buildCookieHeader() {
+    final all = <String, String>{'sdkVersion': _sdkVersion, ..._sessionCookies};
+    return all.entries.map((e) => '${e.key}=${e.value}').join('; ');
+  }
+
+  /// ⚠️ 关键：清理 cookies 到最小集合，只为拿 ssecurity 做 auth2 做准备
+  ///
+  /// 根据 Python 实测，serviceLoginAuth2 在同时带 userId/serviceToken cookie 时，
+  /// 服务器会认为"已登录"，只返回 psecurity 而不返回 ssecurity。
+  /// 正确做法：只保留 auth cookies（不带 userId/serviceToken），让 auth2 返回 ssecurity。
+  void _cleanForSsecurity() {
+    final keep = <String>{};
+    // 先保存需要保留的值
+    final toKeep = <String, String>{};
+    for (final name in ['identity_session', 'passToken', 'passInfo', 'pass_ua', 'deviceId', 'uLocale']) {
+      if (_sessionCookies.containsKey(name)) {
+        toKeep[name] = _sessionCookies[name]!;
+        keep.add(name);
+      }
+    }
+    // 清空
+    _sessionCookies.clear();
+    // 只放保留的
+    _sessionCookies.addAll(toKeep);
+    AppLogger.instance.i('XiaomiLogin',
+        '🧹 Cleaned cookies for ssecurity fetch: keep=[${_sessionCookies.keys.join(",")}]');
   }
 
   /// 开始登录流程
@@ -301,21 +325,26 @@ class XiaomiLoginController {
         return;
       }
 
-      // Step 8: Follow location
+      // Step 8: Follow location → 会设 identity_session 更新 + passToken + serviceToken
       var location = d7['location'] as String;
       if (!location.startsWith('http')) {
         location = 'https://account.xiaomi.com$location';
       }
       await _get(location);
 
-      // Step 9: serviceLogin → fresh _sign + nonce
+      // ⚠️ Step 8.5: 清理 cookies！关键！否则 auth2 只返回 psecurity 不返回 ssecurity
+      _cleanForSsecurity();
+
+      // Step 9: serviceLogin → fresh _sign（用清理后的 auth cookies + sdkVersion）
       final r9 = await _get('https://account.xiaomi.com/pass/serviceLogin',
-          params: {'sid': 'xiaomiio', '_json': 'true'});
+          params: {'sid': 'xiaomiio', '_json': 'true', 'cc': '+86'});
       final d9 = _parseXiaomiJson(r9.body);
       final sign = d9['_sign'] as String;
       final nonce = d9['nonce'] as String? ?? '';
+      AppLogger.instance.i('XiaomiLogin',
+          'Step 9: fresh sign=${sign.substring(0, sign.length > 20 ? 20 : sign.length)}..., hasSsec=${d9.containsKey("ssecurity")}, hasPsec=${d9.containsKey("psecurity")}');
 
-      // Step 10: 关键！重新调 serviceLoginAuth2（带密码 hash）→ 拿 ssecurity
+      // Step 10: 关键！重新调 serviceLoginAuth2（带密码 hash + sdkVersion auth cookies）→ 拿 ssecurity
       _controller.add(LoginEvent.loading('正在完成登录...'));
       final r10 = await _post('https://account.xiaomi.com/pass/serviceLoginAuth2',
           params: {
