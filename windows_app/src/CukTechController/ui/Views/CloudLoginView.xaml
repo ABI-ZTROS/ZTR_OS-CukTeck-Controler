@@ -21,8 +21,9 @@
 
         <StackPanel Grid.Row="2" Orientation="Horizontal"
                     HorizontalAlignment="Center" Margin="10">
-            <Button Content="刷新" Click="RefreshButton_Click" Margin="5"/>
-            <Button Content="取消" Click="CancelButton_Click" Margin="5"/>
+            <Button Content="📥 导入凭证(.cuk)" Click="ImportButton_Click" Margin="5" Padding="10,5"/>
+            <Button Content="刷新" Click="RefreshButton_Click" Margin="5" Padding="10,5"/>
+            <Button Content="取消" Click="CancelButton_Click" Margin="5" Padding="10,5"/>
         </StackPanel>
     </Grid>
 </UserControl>

@@ -1,6 +1,8 @@
 using System;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
+using Microsoft.Win32;
 using CukTechController.Protocol;
 using Microsoft.Web.WebView2.Core;
 
@@ -29,32 +31,15 @@ public partial class CloudLoginView : UserControl
 
         try
         {
-            // 确保 WebView2 初始化完成
             await LoginWebView.EnsureCoreWebView2Async();
             LoginWebView.NavigationCompleted += OnNavigationCompleted;
-            LoginWebView.CoreWebView2.NavigationStarting += OnNavigationStarting;
-            
-            // 导航到米家登录页
-            LoginWebView.Source = new Uri("https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=True");
-            System.Diagnostics.Debug.WriteLine("[CloudLogin] WebView2 initialized, navigating to login page");
+
+            LoginWebView.Source = new Uri(
+                "https://account.xiaomi.com/pass/serviceLogin?sid=xiaomiio&_json=True");
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[CloudLogin] WebView2 init failed: {ex.Message}");
             LoginFailed?.Invoke(this, $"WebView2 初始化失败: {ex.Message}");
-        }
-    }
-
-    private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
-    {
-        var url = e.Uri;
-        System.Diagnostics.Debug.WriteLine($"[CloudLogin] Navigating to: {url}");
-
-        // 检测登录成功的重定向
-        if (url.Contains("sts.api.io.mi.com") && !_loginSuccessReported)
-        {
-            // 登录成功后导航到 sts.api.io.mi.com，延迟提取凭据
-            System.Diagnostics.Debug.WriteLine("[CloudLogin] Detected sts.api.io.mi.com redirect (login success)");
         }
     }
 
@@ -63,8 +48,6 @@ public partial class CloudLoginView : UserControl
         if (_loginSuccessReported) return;
 
         var url = LoginWebView.Source.ToString();
-        System.Diagnostics.Debug.WriteLine($"[CloudLogin] Navigated to: {url}");
-
         try
         {
             if (LoginWebView.CoreWebView2?.CookieManager == null) return;
@@ -73,10 +56,9 @@ public partial class CloudLoginView : UserControl
             string? ssecurity = null;
             string? userId = null;
 
-            // 从多个可能的域名提取凭据
             var domains = new[]
             {
-                url, // 当前页面
+                url,
                 "https://account.xiaomi.com",
                 "https://sts.api.io.mi.com"
             };
@@ -87,20 +69,12 @@ public partial class CloudLoginView : UserControl
                 foreach (var cookie in cookies)
                 {
                     if (cookie.Name == "serviceToken" && serviceToken == null)
-                    {
                         serviceToken = cookie.Value;
-                        System.Diagnostics.Debug.WriteLine($"[CloudLogin] Found serviceToken in {domain}");
-                    }
                     if (cookie.Name == "ssecurity" && ssecurity == null)
-                    {
                         ssecurity = cookie.Value;
-                        System.Diagnostics.Debug.WriteLine($"[CloudLogin] Found ssecurity in {domain}");
-                    }
                     if (cookie.Name == "userId" && userId == null)
                         userId = cookie.Value;
                 }
-
-                // 如果已获取全部凭据，提前退出
                 if (!string.IsNullOrEmpty(serviceToken) && !string.IsNullOrEmpty(ssecurity))
                     break;
             }
@@ -108,15 +82,12 @@ public partial class CloudLoginView : UserControl
             if (!string.IsNullOrEmpty(serviceToken) && !string.IsNullOrEmpty(ssecurity))
             {
                 _loginSuccessReported = true;
-                System.Diagnostics.Debug.WriteLine("[CloudLogin] Login SUCCESS!");
                 _client.SetCredentials(serviceToken, ssecurity, userId ?? "");
-                LoginCompleted?.Invoke(this, new LoginSuccessEventArgs(serviceToken, ssecurity));
+                LoginCompleted?.Invoke(this,
+                    new LoginSuccessEventArgs(serviceToken, ssecurity));
             }
         }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"[CloudLogin] Cookie extraction error: {ex.Message}");
-        }
+        catch { }
     }
 
     private void RefreshButton_Click(object sender, RoutedEventArgs e)
@@ -127,5 +98,72 @@ public partial class CloudLoginView : UserControl
     private void CancelButton_Click(object sender, RoutedEventArgs e)
     {
         Window.GetWindow(this)?.Close();
+    }
+
+    /// <summary>
+    /// 🚀 导入 Android 端导出的 .cuk 凭证文件
+    /// </summary>
+    private async void ImportButton_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new OpenFileDialog
+        {
+            Filter = "酷态科凭证文件 (*.cuk)|*.cuk|所有文件 (*.*)|*.*",
+            Title = "选择 Android 导出的凭证文件",
+            InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+        };
+
+        if (dialog.ShowDialog() != true) return;
+
+        var path = dialog.FileName;
+        var btn = sender as Button;
+        if (btn != null) btn.IsEnabled = false;
+
+        try
+        {
+            var (ok, err) = await TokenRepository.Instance.ImportCloudFromFileAsync(path);
+
+            if (ok)
+            {
+                // 拿到导入的凭证，设置到 CloudClient
+                var cred = await TokenRepository.Instance.GetCloudAsync();
+                if (cred != null)
+                {
+                    _client.SetCredentials(cred.ServiceToken, cred.Ssecurity, cred.UserId);
+                    _loginSuccessReported = true;
+
+                    MessageBox.Show(
+                        $"✅ 凭证导入成功！\n\n" +
+                        $"用户: {cred.UserId}\n" +
+                        $"设备: {cred.Did} ({cred.DeviceName})\n\n" +
+                        $"现在可以直接连接充电器了。",
+                        "导入成功",
+                        MessageBoxButton.OK,
+                        MessageBoxImage.Information);
+
+                    LoginCompleted?.Invoke(this,
+                        new LoginSuccessEventArgs(cred.ServiceToken, cred.Ssecurity));
+                }
+            }
+            else
+            {
+                MessageBox.Show(
+                    $"❌ 导入失败: {err}",
+                    "导入失败",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+            }
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"❌ 导入出错: {ex.Message}",
+                "导入错误",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        finally
+        {
+            if (btn != null) btn.IsEnabled = true;
+        }
     }
 }

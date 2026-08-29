@@ -11,13 +11,21 @@ namespace CukTechController.Protocol
 {
     /// <summary>
     /// Token 仓库 —— 安全存储与读取米家认证 Token
+    ///
+    /// 存储文件：
+    ///   - token.enc          → BLE Token（TokenConfig）
+    ///   - cloud_cred.enc     → 米家云凭证（CloudCredentials）
+    ///
+    /// 跨平台导入/导出格式：.cuk 文件（JSON 格式，与 Android 一致）
     /// </summary>
     public class TokenRepository
     {
         private static TokenRepository? _instance;
         private static readonly object _lock = new object();
         private readonly string _tokenPath;
+        private readonly string _cloudPath;
         private TokenConfig? _cachedToken;
+        private CloudCredentials? _cachedCloud;
 
         public static TokenRepository Instance
         {
@@ -39,11 +47,13 @@ namespace CukTechController.Protocol
                 "Secrets");
             Directory.CreateDirectory(configDir);
             _tokenPath = Path.Combine(configDir, "token.enc");
+            _cloudPath = Path.Combine(configDir, "cloud_cred.enc");
         }
 
-        /// <summary>
-        /// 获取当前存储的 Token
-        /// </summary>
+        // ============================================================
+        //  BLE Token (TokenConfig) — 原有逻辑保留
+        // ============================================================
+
         public async Task<TokenConfig?> GetTokenAsync()
         {
             if (_cachedToken != null) return _cachedToken;
@@ -52,8 +62,7 @@ namespace CukTechController.Protocol
             {
                 if (File.Exists(_tokenPath))
                 {
-                    var encrypted = await File.ReadAllBytesAsync(_tokenPath);
-                    var json = Encoding.UTF8.GetString(encrypted); // TODO: 解密
+                    var json = await File.ReadAllTextAsync(_tokenPath);
                     _cachedToken = JsonSerializer.Deserialize<TokenConfig>(json);
                 }
             }
@@ -65,17 +74,13 @@ namespace CukTechController.Protocol
             return _cachedToken;
         }
 
-        /// <summary>
-        /// 保存 Token
-        /// </summary>
         public async Task SaveTokenAsync(TokenConfig token)
         {
             _cachedToken = token;
             try
             {
                 var json = JsonSerializer.Serialize(token);
-                var encrypted = Encoding.UTF8.GetBytes(json); // TODO: 加密
-                await File.WriteAllBytesAsync(_tokenPath, encrypted);
+                await File.WriteAllTextAsync(_tokenPath, json);
                 AppLogger.Info($"Token saved for user: {token.UserId}");
             }
             catch (Exception ex)
@@ -84,18 +89,12 @@ namespace CukTechController.Protocol
             }
         }
 
-        /// <summary>
-        /// 清除 Token
-        /// </summary>
         public async Task ClearTokenAsync()
         {
             _cachedToken = null;
             try
             {
-                if (File.Exists(_tokenPath))
-                {
-                    File.Delete(_tokenPath);
-                }
+                if (File.Exists(_tokenPath)) File.Delete(_tokenPath);
                 AppLogger.Info("Token cleared");
             }
             catch (Exception ex)
@@ -104,13 +103,177 @@ namespace CukTechController.Protocol
             }
         }
 
-        /// <summary>
-        /// 检查 Token 是否存在
-        /// </summary>
         public async Task<bool> HasTokenAsync()
         {
             var token = await GetTokenAsync();
             return token?.IsValid ?? false;
+        }
+
+        // ============================================================
+        //  🚀 米家云凭证 (CloudCredentials) — 新增
+        // ============================================================
+
+        public async Task<CloudCredentials?> GetCloudAsync()
+        {
+            if (_cachedCloud != null) return _cachedCloud;
+
+            try
+            {
+                if (File.Exists(_cloudPath))
+                {
+                    var json = await File.ReadAllTextAsync(_cloudPath);
+                    _cachedCloud = JsonSerializer.Deserialize<CloudCredentials>(json);
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Failed to load cloud creds", ex);
+            }
+
+            return _cachedCloud;
+        }
+
+        public async Task SaveCloudAsync(CloudCredentials cred)
+        {
+            _cachedCloud = cred;
+            try
+            {
+                var json = JsonSerializer.Serialize(cred);
+                await File.WriteAllTextAsync(_cloudPath, json);
+                AppLogger.Info($"☁️ Cloud creds saved: user={cred.UserId}, did={cred.Did}");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Failed to save cloud creds", ex);
+            }
+        }
+
+        public async Task ClearCloudAsync()
+        {
+            _cachedCloud = null;
+            try
+            {
+                if (File.Exists(_cloudPath)) File.Delete(_cloudPath);
+                AppLogger.Info("Cloud creds cleared");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Failed to clear cloud creds", ex);
+            }
+        }
+
+        public async Task<bool> HasCloudAsync()
+        {
+            var cred = await GetCloudAsync();
+            return cred?.IsValid ?? false;
+        }
+
+        // ============================================================
+        //  🚀 跨平台 JSON 导入 / 导出
+        // ============================================================
+
+        /// <summary>
+        /// 导出当前云凭证为 JSON 字符串（可保存为 .cuk 文件发到 Android）
+        /// </summary>
+        public async Task<string?> ExportCloudToJsonAsync()
+        {
+            var cred = await GetCloudAsync();
+            if (cred == null || !cred.IsValid)
+            {
+                AppLogger.Warning("No valid cloud creds to export");
+                return null;
+            }
+
+            var bundle = new CloudExportBundle
+            {
+                Version = 1,
+                ExportedAt = DateTime.UtcNow.ToString("o"),
+                XiaomiCloud = cred,
+            };
+
+            var json = JsonSerializer.Serialize(bundle, new JsonSerializerOptions { WriteIndented = true });
+            AppLogger.Info("📤 Cloud export JSON ready");
+            return json;
+        }
+
+        /// <summary>
+        /// 从 JSON 字符串导入云凭证（Android 发来的 .cuk 文件）
+        /// 返回 (bool success, string? errorMessage)
+        /// </summary>
+        public async Task<(bool, string?)> ImportCloudFromJsonAsync(string json)
+        {
+            try
+            {
+                var bundle = JsonSerializer.Deserialize<CloudExportBundle>(json);
+                if (bundle == null)
+                    return (false, "JSON 解析失败");
+
+                if (bundle.Version != 1)
+                    return (false, $"不支持的导出版本: {bundle.Version}");
+
+                var cred = bundle.XiaomiCloud;
+                if (cred == null || string.IsNullOrEmpty(cred.Ssecurity) ||
+                    string.IsNullOrEmpty(cred.ServiceToken) || string.IsNullOrEmpty(cred.UserId))
+                    return (false, "凭证字段不完整");
+
+                await SaveCloudAsync(cred);
+                AppLogger.Info($"📥 Cloud import OK: user={cred.UserId}, did={cred.Did}");
+                return (true, null);
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("Import failed", ex);
+                return (false, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 从 .cuk 文件导入
+        /// </summary>
+        public async Task<(bool, string?)> ImportCloudFromFileAsync(string filePath)
+        {
+            try
+            {
+                if (!File.Exists(filePath))
+                    return (false, "文件不存在");
+
+                var json = await File.ReadAllTextAsync(filePath);
+                return await ImportCloudFromJsonAsync(json);
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
+        }
+
+        /// <summary>
+        /// 导出到 .cuk 文件
+        /// </summary>
+        public async Task<(bool, string?, string?)> ExportCloudToFileAsync(string? filePath = null)
+        {
+            var json = await ExportCloudToJsonAsync();
+            if (json == null)
+                return (false, null, "没有可导出的云凭证");
+
+            try
+            {
+                if (string.IsNullOrEmpty(filePath))
+                {
+                    var ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+                    var dir = Path.Combine(
+                        Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments),
+                        "CukTechController");
+                    Directory.CreateDirectory(dir);
+                    filePath = Path.Combine(dir, $"cuk_cloud_{ts}.cuk");
+                }
+
+                await File.WriteAllTextAsync(filePath, json);
+                return (true, filePath, null);
+            }
+            catch (Exception ex)
+            {
+                return (false, null, ex.Message);
+            }
         }
     }
 }

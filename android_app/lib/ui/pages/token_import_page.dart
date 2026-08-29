@@ -341,6 +341,21 @@ class _TokenImportPageState extends State<TokenImportPage> {
       );
 
       await _store.write(cfg);
+
+      // 🚀 同时保存完整云凭证（跨平台导出用）
+      final ctx = XiaomiCloudClient.instance.loginContext;
+      if (ctx != null) {
+        final cloudCred = CloudCredentials(
+          userId: ctx.userId,
+          ssecurity: ctx.ssecurity,
+          serviceToken: ctx.serviceToken,
+          did: dev.did,
+          beaconKey: beaconKey ?? '',
+          deviceName: dev.name,
+          deviceModel: dev.model,
+        );
+        await _store.writeCloud(cloudCred);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

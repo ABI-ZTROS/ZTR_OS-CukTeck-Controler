@@ -128,3 +128,33 @@ namespace CukTechController.Models
             !string.IsNullOrEmpty(Did);
     }
 }
+/// <summary>
+/// 米家云凭证 —— 跨平台 JSON 导出/导入数据类
+/// 与 Android CloudCredentials 格式一致
+/// </summary>
+public class CloudCredentials
+{
+    public string UserId { get; set; } = "";
+    public string Ssecurity { get; set; } = "";
+    public string ServiceToken { get; set; } = "";
+    public string Did { get; set; } = "";
+    public string BeaconKey { get; set; } = "";
+    public string DeviceName { get; set; } = "";
+    public string DeviceModel { get; set; } = "";
+
+    public bool IsValid =>
+        !string.IsNullOrEmpty(Ssecurity) &&
+        !string.IsNullOrEmpty(ServiceToken) &&
+        !string.IsNullOrEmpty(UserId);
+}
+
+/// <summary>
+/// 跨平台导出包装类
+/// JSON 格式与 Android SecureTokenStore 导出一致
+/// </summary>
+public class CloudExportBundle
+{
+    public int Version { get; set; } = 1;
+    public string ExportedAt { get; set; } = "";
+    public CloudCredentials XiaomiCloud { get; set; } = new();
+}
