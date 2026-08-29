@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../utils/logger/logger.dart';
+import 'models.dart';
 
 /// 基于 flutter_secure_storage 的 Token 持久化层
 ///
