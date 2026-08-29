@@ -40,22 +40,19 @@ jobs:
           if [ -d android-app-custom/manifest/res ]; then
             cp -r android-app-custom/manifest/res/* android/app/src/main/res/
           fi
-      - name: Patch compileSdk 34 → 33 (share_plus compatibility)
+      - name: Patch compileSdk → 33 (share_plus compatibility)
         working-directory: android_app
         run: |
-          # Flutter 3.27+ defaults compileSdk 34, but share_plus 7.2.2 is built for android-33
-          # AGP 8's checkReleaseAarMetadata refuses AAR built for older platform
-          # Easiest fix: downgrade compileSdk back to 33 in the generated build.gradle.kts
-          if grep -q "compileSdk = 34" android/app/build.gradle.kts; then
-            sed -i 's/compileSdk = 34/compileSdk = 33/' android/app/build.gradle.kts
-            echo "Patched compileSdk 34 → 33"
-          elif grep -q "compileSdkVersion 34" android/app/build.gradle; then
-            sed -i 's/compileSdkVersion 34/compileSdkVersion 33/' android/app/build.gradle
-            echo "Patched compileSdkVersion 34 → 33"
-          else
-            echo "compileSdk not 34 — current value:"
-            grep "compileSdk" android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || true
-          fi
+          # share_plus 7.2.2 built for android-33; AGP 8 rejects older AARs against compileSdk 34
+          # Force compileSdk to 33 in both kts and gradle files, any format
+          echo "=== Before patch ==="
+          grep -i "compileSdk" android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || echo "no match"
+          sed -i -E 's/(compileSdk|compileSdkVersion)[[:space:]]*=[[:space:]]*[0-9]+/\1 = 33/g' android/app/build.gradle.kts 2>/dev/null || true
+          sed -i -E 's/(compileSdk|compileSdkVersion)[[:space:]]*=[[:space:]]*[0-9]+/\1 = 33/g' android/app/build.gradle 2>/dev/null || true
+          # Also handle the "compileSdk 34" (no equals) Groovy style
+          sed -i -E 's/compileSdk[[:space:]]+[0-9]+/compileSdk = 33/g' android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || true
+          echo "=== After patch ==="
+          grep -i "compileSdk" android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || echo "no match" 
 
       - name: Patch flutter_inappwebview proguard compatibility
         run: |
