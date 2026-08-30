@@ -32,3 +32,4 @@ Thumbs.db
 secrets/
 *.key
 keystore.properties
+release_apk/
