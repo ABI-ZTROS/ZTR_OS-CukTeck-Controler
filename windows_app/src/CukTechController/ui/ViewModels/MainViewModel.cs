@@ -52,6 +52,24 @@ public class MainViewModel : INotifyPropertyChanged
     public bool IsConnecting { get => _isConnecting; set { _isConnecting = value; OnPropertyChanged(); } }
     public bool IsConnected { get => _isConnected; set { _isConnected = value; OnPropertyChanged(); } }
 
+    public HashSet<int> ActivePorts { get; private set; } = new();
+    public double TotalPower => Ports.Where(p => p.IsActive).Sum(p => p.Power);
+    public int ActivePortCount => ActivePorts.Count;
+
+    // 端口快捷文本（WPF 绑定用）
+    public string C1PortText => GetPortText(1);
+    public string C2PortText => GetPortText(2);
+    public string C3PortText => GetPortText(3);
+    public string APortText => GetPortText(4);
+
+    private string GetPortText(int piid)
+    {
+        var p = Ports.FirstOrDefault(x => x.Piid == piid);
+        if (p == null) return "--";
+        if (!p.IsActive) return $"idle";
+        return $"{p.Power:F1}W · {p.Protocol}";
+    }
+
     public string StatusMessage
     {
         get => _statusMessage;

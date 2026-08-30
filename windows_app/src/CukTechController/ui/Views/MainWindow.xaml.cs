@@ -1,135 +1,89 @@
-using System;
-using System.Globalization;
+using System.IO;
 using System.Windows;
-using System.Windows.Data;
-using System.Windows.Media;
+using Microsoft.Win32;
+using CukTechController.Controls;
+using CukTechController.Protocol;
 using CukTechController.ViewModels;
-using CukTechController.Utils;
 
-namespace CukTechController.Views
+namespace CukTechController.Views;
+
+public partial class MainWindow : Window
 {
-    /// <summary>
-    /// MainWindow 的交互逻辑
-    /// </summary>
-    public partial class MainWindow : Window
-    {
-        private MainViewModel? _vm;
+    private readonly MainViewModel _vm;
 
-        public MainWindow()
+    public MainWindow()
+    {
+        InitializeComponent();
+        _vm = (MainViewModel)DataContext;
+
+        // 订阅 ViewModel 事件
+        _vm.OpenSettingsRequested += (_, _) => Settings_Click(this, RoutedEventArgs.Empty);
+        _vm.OpenLogRequested += (_, _) => Log_Click(this, RoutedEventArgs.Empty);
+        _vm.OpenControlRequested += (_, piid) =>
         {
-            InitializeComponent();
-            _vm = (MainViewModel?)DataContext;
-            if (_vm != null)
+            var view = new PortControlView(piid);
+            view.ShowDialog();
+        };
+    }
+
+    private void CloudLogin_Click(object sender, RoutedEventArgs e)
+    {
+        var dialog = new CloudLoginView();
+        dialog.Owner = this;
+        dialog.ShowDialog();
+    }
+
+    private void Import_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new OpenFileDialog
+        {
+            Filter = "酷态科凭证 (*.cuk)|*.cuk|所有文件 (*.*)|*.*",
+            Title = "选择 Android 导出的凭证文件"
+        };
+        if (dlg.ShowDialog() == true)
+        {
+            var (ok, err) = TokenRepository.Instance.ImportCloudFromFileAsync(dlg.FileName).GetAwaiter().GetResult();
+            if (ok)
             {
-                _vm.OpenControlRequested += OnOpenControlRequested;
-                _vm.OpenSettingsRequested += OnOpenSettingsRequested;
-                _vm.OpenLogRequested += OnOpenLogRequested;
+                MessageBox.Show("✅ 凭证导入成功！\n现在可以直接连接充电器了。",
+                    "导入成功", MessageBoxButton.OK, MessageBoxImage.Information);
             }
-            AppLogger.Debug("MainWindow initialized");
-        }
-
-        protected override void OnClosed(EventArgs e)
-        {
-            if (_vm != null)
+            else
             {
-                _vm.OpenControlRequested -= OnOpenControlRequested;
-                _vm.OpenSettingsRequested -= OnOpenSettingsRequested;
-                _vm.OpenLogRequested -= OnOpenLogRequested;
+                MessageBox.Show($"❌ 导入失败: {err}", "错误",
+                    MessageBoxButton.OK, MessageBoxImage.Error);
             }
-            base.OnClosed(e);
-        }
-
-        private void OnOpenControlRequested(object? sender, int piid)
-        {
-            var vm = new PortControlViewModel(piid);
-            var window = new PortControlView { DataContext = vm };
-            window.Show();
-        }
-
-        private void OnOpenSettingsRequested(object? sender, EventArgs e)
-        {
-            var vm = new SettingsViewModel();
-            var window = new SettingsView { DataContext = vm };
-            window.Show();
-        }
-
-        private void OnOpenLogRequested(object? sender, EventArgs e)
-        {
-            var window = new LogView();
-            window.Show();
         }
     }
 
-    // ========================================================================
-    // 值转换器
-    // ========================================================================
-
-    /// <summary>
-    /// 布尔取反转换器
-    /// </summary>
-    public class InvertBoolConverter : IValueConverter
+    private void Settings_Click(object sender, RoutedEventArgs e)
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value is bool b) return !b;
-            return true;
-        }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value is bool b) return !b;
-            return true;
-        }
+        var view = new SettingsView { Owner = this };
+        view.ShowDialog();
     }
 
-    /// <summary>
-    /// 字符串 → 可见性转换器（空字符串折叠）
-    /// </summary>
-    public class StringToVisibilityConverter : IValueConverter
+    private void Log_Click(object sender, RoutedEventArgs e)
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            var str = value as string;
-            return string.IsNullOrEmpty(str) ? Visibility.Collapsed : Visibility.Visible;
-        }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotSupportedException();
-        }
+        var view = new LogView { Owner = this };
+        view.ShowDialog();
     }
 
-    /// <summary>
-    /// 布尔 → 连接状态文本转换器
-    /// </summary>
-    public class BoolToConnTextConverter : IValueConverter
+    private void AllOn_Click(object sender, RoutedEventArgs e)
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value is bool b) return b ? "已连接" : "未连接";
-            return "未知";
-        }
-
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotSupportedException();
-        }
+        if (!_vm.IsConnected) return;
+        foreach (var port in _vm.Ports.Where(p => !p.IsActive))
+            _vm.OpenControlRequested?.Invoke(this, port.Piid);
     }
 
-    /// <summary>
-    /// 布尔 → 开启/关闭文本转换器
-    /// </summary>
-    public class BoolToOnOffConverter : IValueConverter
+    private void AllOff_Click(object sender, RoutedEventArgs e)
     {
-        public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            if (value is bool b) return b ? "关闭" : "开启";
-            return "开启";
-        }
+        if (!_vm.IsConnected) return;
+        foreach (var port in _vm.Ports.Where(p => p.IsActive))
+            _vm.OpenControlRequested?.Invoke(this, port.Piid);
+    }
 
-        public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
-        {
-            throw new NotSupportedException();
-        }
+    private void Disconnect_Click(object sender, RoutedEventArgs e)
+    {
+        _vm.DisconnectCommand.Execute(null);
     }
 }

@@ -1,0 +1,24 @@
+<UserControl x:Class="CukTechController.Controls.PowerRingControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="Root"
+             MinWidth="240" MinHeight="240">
+
+    <Grid>
+        <!-- 背景环 -->
+        <ArcSegment x:Name="BgArc"/>
+        <!-- 进度环 -->
+        <ArcSegment x:Name="ProgressArc"/>
+        <!-- 中心文字 -->
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+            <TextBlock x:Name="PowerText"
+                       FontSize="32" FontWeight="Bold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       TextAlignment="Center"/>
+            <TextBlock x:Name="SubText"
+                       FontSize="11"
+                       Foreground="{StaticResource TextSecondaryBrush}"
+                       TextAlignment="Center" Margin="0,4,0,0"/>
+        </StackPanel>
+    </Grid>
+</UserControl>
