@@ -134,7 +134,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
       _errorMessage = null;
     });
     try {
-      final results = await _scanner.scan();
+      final results = await _scanner.start();
       if (results.isNotEmpty) {
         await _connect(results.first);
       } else {
@@ -151,24 +151,26 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     }
   }
 
-  Future<void> _connect(CuktechScanResult device) async {
+  Future<void> _connect(CuktechScanResult result) async {
     setState(() {
       _isConnecting = true;
       _currentStep = 0;
     });
     try {
-      await _connector.connect(device);
+      final ok = await _connector.connect(result.device);
       for (var i = 0; i < _authSteps.length; i++) {
         setState(() => _currentStep = i);
         await Future.delayed(const Duration(milliseconds: 300));
       }
-      _connector.authenticated = true;
+      if (!ok) throw Exception("BLE 连接失败");
+      // Authenticator 会在 connect 内部完成认证
+      await Future.delayed(const Duration(milliseconds: 200));
       setState(() {
         _isConnecting = false;
         _isConnected = true;
         _currentStep = -1;
       });
-      PortDecoderWiring.start();
+      await wirePortDecoder(_connector);
     } catch (e) {
       setState(() {
         _isConnecting = false;
@@ -180,7 +182,10 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   Future<void> _togglePort(int piid) async {
     if (!_isConnected) return;
     try {
-      await PortControl.instance.togglePort(_connector, piid);
+      final portKey = piid == 1 ? 'C1' : piid == 2 ? 'C2' : piid == 3 ? 'C3' : 'A';
+      final currentState = _portStates[piid];
+      final targetOn = !(currentState?.active ?? false);
+      await PortControl.instance.setPort(_connector, portKey, targetOn);
       await Future.delayed(const Duration(milliseconds: 200));
     } catch (e) {
       if (mounted) {
@@ -393,7 +398,7 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
           ),
 
           // 4 个端口按钮（环形分布，stagger 入场）
-          for (final entry in _radialPositions())
+          for (final entry in _radialPositions().entries)
             _buildStaggeredPortButton(entry.key, entry.value),
         ],
       ),
