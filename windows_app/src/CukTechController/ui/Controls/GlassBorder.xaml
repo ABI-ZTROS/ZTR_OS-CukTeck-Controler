@@ -9,6 +9,6 @@
             <BlurEffect Radius="15"/>
         </Border.Effect>
         <ContentPresenter x:Name="Content"
-                          Margin="{Binding Padding, ElementName=Root}"/>
+                          Margin="{Binding InnerPadding, ElementName=Root}"/>
     </Border>
 </UserControl>

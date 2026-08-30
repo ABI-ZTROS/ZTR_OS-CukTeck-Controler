@@ -15,14 +15,14 @@ public partial class GlassBorder : UserControl
         set => SetValue(RadiusProperty, value);
     }
 
-    public static readonly DependencyProperty PaddingProperty =
+    public static readonly DependencyProperty InnerPaddingProperty =
         DependencyProperty.Register(nameof(Padding), typeof(Thickness), typeof(GlassBorder),
             new PropertyMetadata(new Thickness(12)));
 
-    public Thickness Padding
+    public Thickness InnerPadding
     {
-        get => (Thickness)GetValue(PaddingProperty);
-        set => SetValue(PaddingProperty, value);
+        get => (Thickness)GetValue(InnerPaddingProperty);
+        set => SetValue(InnerPaddingProperty, value);
     }
 
     public GlassBorder() { InitializeComponent(); }
