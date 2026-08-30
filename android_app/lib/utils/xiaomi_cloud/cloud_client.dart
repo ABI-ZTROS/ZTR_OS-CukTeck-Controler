@@ -212,14 +212,4 @@ class XiaomiCloudClient {
     _location = '';
     _isLoggedIn = false;
     AppLogger.instance.i('XiaomiCloudClient', 'Logged out');
-  }
-
-  // TODO: 待抓包补充 - QR 登录相关方法
-  Future<QrCodeData> startQrLogin() {
-    throw UnimplementedError('QR login not yet implemented');
-  }
-
-  Future<QrScanStatus> pollQrStatus(String sessionId) {
-    throw UnimplementedError('QR login not yet implemented');
-  }
 }
