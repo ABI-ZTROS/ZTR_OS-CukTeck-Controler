@@ -1,13 +1,12 @@
 <UserControl x:Class="CukTechController.Controls.GlassBorder"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             xmlns:ef="clr-namespace:System.Windows.Media.Effects;assembly=PresentationCore"
              x:Name="Root">
     <Border Background="#CC111827"
             CornerRadius="{Binding Radius, ElementName=Root}"
             BorderBrush="#26FFFFFF" BorderThickness="1">
         <Border.Effect>
-            <ef:BlurEffect BlurRadius="20" KernelType="Gaussian" RenderingBias="Quality"/>
+            <BlurEffect Radius="15"/>
         </Border.Effect>
         <ContentPresenter x:Name="Content"
                           Margin="{Binding Padding, ElementName=Root}"/>
