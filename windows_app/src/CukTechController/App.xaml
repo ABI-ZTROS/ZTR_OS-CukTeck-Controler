@@ -2,7 +2,7 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:CukTechController"
-             xmlns:v="clr-namespace:CukTechController.UI.Views"
+             xmlns:v="clr-namespace:CukTechController.Views"
              xmlns:mdi="clr-namespace:MaterialDesignThemes.Wpf;assembly=MaterialDesignThemes.Wpf"
              StartupUri="ui/Views/MainWindow.xaml">
     <Application.Resources>
