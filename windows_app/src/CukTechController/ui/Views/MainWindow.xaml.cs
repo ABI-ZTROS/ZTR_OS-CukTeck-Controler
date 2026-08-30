@@ -1,17 +1,30 @@
+// ═══════════════════════════════════════════════════════════════════════
+// 🪟 MainWindow — 主窗口
+//   启动时应用 ColorOS VisualPack (Mica/圆角/深色标题栏)
+//   使用 AnimationHelper.ColorOS 入场动画
+// ═══════════════════════════════════════════════════════════════════════
+
 using System.Windows;
+using System.Windows.Interop;
 using CukTechController.Protocol;
+using CukTechController.UI.Helpers;
 using CukTechController.ViewModels;
+using Serilog;
 
 namespace CukTechController.Views;
 
 public partial class MainWindow : Window
 {
     private readonly MainViewModel _vm;
+    private bool _visualPackApplied;
 
     public MainWindow()
     {
         InitializeComponent();
         _vm = (MainViewModel)DataContext;
+
+        // ═══ Show 后应用 ColorOS VisualPack + 入场动画 ═══
+        Loaded += MainWindow_Loaded;
 
         // 订阅 ViewModel 事件
         _vm.OpenSettingsRequested += (_, _) =>
@@ -26,9 +39,29 @@ public partial class MainWindow : Window
         };
     }
 
+    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    {
+        // 1. 应用 ColorOS VisualPack (Mica/深色标题栏/小圆角)
+        if (!_visualPackApplied)
+        {
+            try
+            {
+                var hWnd = new WindowInteropHelper(this).EnsureHandle();
+                ((App)Application.Current).ApplyColorOSToWindow(hWnd);
+                _visualPackApplied = true;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "[MAIN] ColorOS VisualPack 应用失败");
+            }
+        }
+
+        // 2. ColorOS 入场动画（淡入 + 从下方滑入）
+        AnimationHelper.PlayPageEntrance(this, durationMs: 400, slideDistance: 24);
+    }
+
     private void CloudLogin_Click(object sender, RoutedEventArgs e)
     {
-        // CloudLoginView 是 UserControl，简化处理
         MessageBox.Show("云登录功能已集成在设置中\n导入凭证按钮可直接导入 Android 导出的 .cuk 文件",
             "云登录", MessageBoxButton.OK, MessageBoxImage.Information);
     }
