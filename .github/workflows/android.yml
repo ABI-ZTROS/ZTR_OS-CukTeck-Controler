@@ -45,13 +45,20 @@ jobs:
         run: |
           # share_plus 7.2.2 built for android-33; AGP 8 rejects older AARs against compileSdk 34
           # Flutter 3.27+ uses compileSdk = flutter.compileSdkVersion (variable = 34)
-          # Replace variable reference with hardcoded 33
-          echo "=== Before patch ==="
-          cat android/app/build.gradle.kts | grep -i "compileSdk"
-          # Replace anything after "compileSdk =" on that line (variable or number) with 33
-          sed -i -E 's/(compileSdk|compileSdkVersion)[[:space:]]*=[[:space:]]*.*/\1 = 33/g' android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || true
+          python3 -c "
+import re, pathlib
+for p in pathlib.Path('android').rglob('build.gradle*'):
+    t = p.read_text()
+    # Replace compileSdk = <anything>  with compileSdk = 33
+    t2 = re.sub(r'compileSdk(?:Version)?\s*=\s*.+', 'compileSdk = 33', t)
+    if t2 != t:
+        p.write_text(t2)
+        print(f'Patched {p}')
+    else:
+        print(f'No change in {p}')
+"
           echo "=== After patch ==="
-          cat android/app/build.gradle.kts | grep -i "compileSdk" 
+          grep -i "compileSdk" android/app/build.gradle.kts || echo "not found
 
       - name: Patch flutter_inappwebview proguard compatibility
         run: |
