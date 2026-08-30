@@ -72,9 +72,10 @@ public partial class PowerRingControl : UserControl
         RingHost.Children.Insert(0, bgPath);
 
         // 进度环
+        var connectedBrush = FindResource("ConnectedBrush") as Brush ?? Brushes.LimeGreen;
         var progPath = new Path
         {
-            Stroke = (Brush)FindResource("ConnectedBrush"),
+            Stroke = connectedBrush,
             StrokeThickness = 10,
             StrokeStartLineCap = PenLineCap.Round,
             StrokeEndLineCap = PenLineCap.Round,

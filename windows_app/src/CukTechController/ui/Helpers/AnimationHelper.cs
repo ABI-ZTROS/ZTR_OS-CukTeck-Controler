@@ -20,7 +20,8 @@ public static class AnimationHelper
 
     /// <summary>
     /// 页面淡入 + 从下方滑入（ColorOS 标准入场）
-    /// Window 不能应用 TranslateTransform —— 自动作用在 Window.Content 上
+    /// Window 不能应用 TranslateTransform —— 自动作用在 Window.Content（内部容器）上
+    /// 如果 Content 也为 null，则退化为纯淡入动画
     /// </summary>
     /// <param name="slideDistance">滑动距离(px)，默认 20</param>
     public static void PlayPageEntrance(
@@ -28,12 +29,24 @@ public static class AnimationHelper
         int durationMs = 350,
         double slideDistance = 20)
     {
+        if (page == null) return;
+
         // Window 的 CoerceRenderTransform 禁止 TranslateTransform，
-        // 必须动画化 Window.Content（内部容器），不是 Window 自身
-        UIElement target = page;
-        if (page is System.Windows.Window w)
+        // 必须动画化 Window.Content（内部容器），绝对不能动 Window 自身
+        FrameworkElement? target = null;
+        if (page is Window w)
         {
-            target = w.Content as UIElement ?? page;
+            target = w.Content as FrameworkElement;
+        }
+
+        // 如果找不到内部容器，退化为纯淡入（不设置 TranslateTransform）
+        if (target == null)
+        {
+            page.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
+            {
+                FadeIn(page, durationMs);
+            });
+            return;
         }
 
         page.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
@@ -49,6 +62,10 @@ public static class AnimationHelper
     /// <summary>淡入 + 从下方滑入</summary>
     public static void FadeAndSlideIn(UIElement element, int durationMs, double slideDistance = 20)
     {
+        // 安全检查：Window 不允许设置 TranslateTransform
+        if (element is Window) { FadeIn(element, durationMs); return; }
+        if (element == null) return;
+
         if (!AnimationSettings.AnimationsEnabled || durationMs <= 0)
         {
             element.Opacity = 1;
@@ -90,6 +107,9 @@ public static class AnimationHelper
     /// <summary>淡入 + 从左侧滑入</summary>
     public static void FadeAndSlideInFromLeft(UIElement element, int durationMs, double slideDistance = 20)
     {
+        if (element is Window) { FadeIn(element, durationMs); return; }
+        if (element == null) return;
+
         if (!AnimationSettings.AnimationsEnabled || durationMs <= 0)
         {
             element.Opacity = 1;
@@ -153,6 +173,9 @@ public static class AnimationHelper
     public static void FadeAndSlideInWithDelay(
         UIElement element, int durationMs, int delayMs, double slideDistance = 16)
     {
+        if (element is Window) { FadeIn(element, durationMs); return; }
+        if (element == null) return;
+
         if (!AnimationSettings.AnimationsEnabled || (durationMs <= 0 && delayMs <= 0))
         {
             element.Opacity = 1;

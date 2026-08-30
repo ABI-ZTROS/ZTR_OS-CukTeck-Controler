@@ -16,7 +16,7 @@ public partial class GlassBorder : UserControl
     }
 
     public static readonly DependencyProperty InnerPaddingProperty =
-        DependencyProperty.Register(nameof(Padding), typeof(Thickness), typeof(GlassBorder),
+        DependencyProperty.Register(nameof(InnerPadding), typeof(Thickness), typeof(GlassBorder),
             new PropertyMetadata(new Thickness(12)));
 
     public Thickness InnerPadding

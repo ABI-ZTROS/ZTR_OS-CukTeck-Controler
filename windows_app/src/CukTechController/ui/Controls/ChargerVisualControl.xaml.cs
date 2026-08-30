@@ -66,13 +66,34 @@ public partial class ChargerVisualControl : UserControl
 
     private void UpdateActiveVisuals(HashSet<int> active)
     {
+        // 安全获取 Brush（Color 资源需包装，Brush 资源直接用，都找不到则 fallback）
+        Brush GetBrush(string brushKey, string colorKey, Brush fallback)
+        {
+            try
+            {
+                var r = FindResource(brushKey);
+                if (r is Brush b) return b;
+            }
+            catch { }
+            try
+            {
+                var r = FindResource(colorKey);
+                if (r is Color c) return new SolidColorBrush(c);
+            }
+            catch { }
+            return fallback;
+        }
+
+        var accentGreen = GetBrush("AccentGreenBrush", "AccentGreen", Brushes.LimeGreen);
+        var accentBlue = GetBrush("AccentBlueBrush", "AccentBlue", Brushes.DodgerBlue);
+
         foreach (var kv in _leds)
         {
             var led = kv.Value;
             if (active.Contains(kv.Key))
             {
                 // 活跃 LED — 翡翠绿 + 呼吸
-                led.Fill = (Brush)FindResource("AccentGreen");
+                led.Fill = accentGreen;
                 led.BeginAnimation(OpacityProperty, _pulseAnim);
             }
             else
@@ -87,7 +108,7 @@ public partial class ChargerVisualControl : UserControl
         // 中心能量点
         var centerActive = active.Count > 0;
         CenterEnergy.Fill = centerActive
-            ? (Brush)FindResource("AccentBlue")
+            ? accentBlue
             : new SolidColorBrush(Color.FromArgb(80, 255, 255, 255));
         if (centerActive)
         {
