@@ -3,14 +3,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:local="clr-namespace:CukTechController"
              xmlns:v="clr-namespace:CukTechController.Views"
-             xmlns:mdi="clr-namespace:MaterialDesignThemes.Wpf;assembly=MaterialDesignThemes.Wpf"
-             StartupUri="ui/Views/MainWindow.xaml">
+             xmlns:materialDesign="http://materialdesigninxaml.net/winfx/xaml/themes">
     <Application.Resources>
         <ResourceDictionary>
             <ResourceDictionary.MergedDictionaries>
-                <!-- 🎨 Material Design 深色主题（MSMC 同款基础）-->
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Dark.xaml" />
-                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesignTheme.Defaults.xaml" />
+                <!-- 🎨 Material Design 3 深色主题（MSMC BundledTheme 方式）-->
+                <materialDesign:BundledTheme BaseTheme="Dark"
+                                              PrimaryColor="Blue"
+                                              SecondaryColor="Purple" />
+                <ResourceDictionary Source="pack://application:,,,/MaterialDesignThemes.Wpf;component/Themes/MaterialDesign2.Defaults.xaml" />
                 <!-- 酷态科自定义主题覆盖 -->
                 <ResourceDictionary Source="ui/Themes/AppTheme.xaml" />
             </ResourceDictionary.MergedDictionaries>
