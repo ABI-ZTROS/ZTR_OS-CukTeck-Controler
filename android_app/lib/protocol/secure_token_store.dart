@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:cross_file/cross_file.dart';
 
 import '../utils/logger/logger.dart';
 import 'models.dart';
@@ -188,8 +189,8 @@ class SecureTokenStore {
       await file.writeAsString(json);
 
       // share_plus 7.x API: Share.shareFiles(List<String>)
-      await Share.shareFiles(
-        [path],
+      await Share.shareXFiles(
+        [XFile(path)],
         text: '酷态科云凭证 — 可直接在 Windows 端导入使用',
         subject: 'CUKTECH Cloud Credentials',
       );

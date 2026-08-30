@@ -1,16 +1,17 @@
-import 'dart:convert';
+import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import '../../utils/xiaomi_cloud/webview_login.dart';
 
-/// 米家云登录页面 —— WebView 全流程
+/// 米家云登录页面 —— 纯 HTTP 实现
 ///
-/// 用户在 WebView 里完整走完浏览器登录（密码 + OTP），
-/// 登录成功后：
-///   1. 从 CookieManager 提取 cookies → 拿到 serviceToken / userId
-///   2. 通过 JS fetch() 调 serviceLogin（带 credentials:include）→ 拿到 ssecurity
+/// 用户输入账号密码，走 HTTP API 登录流程：
+///   密码 → serviceLoginAuth2 → (2FA 验证码) → ssecurity + serviceToken
+///
+/// 依赖：[XiaomiLoginController]（纯 HTTP，不需要 WebView）
 class WebviewLoginPage extends StatefulWidget {
-  final Function(String serviceToken, String ssecurity, String userId) onLoginSuccess;
+  final Function(String serviceToken, String ssecurity, String userId)
+      onLoginSuccess;
 
   const WebviewLoginPage({super.key, required this.onLoginSuccess});
 
@@ -19,191 +20,220 @@ class WebviewLoginPage extends StatefulWidget {
 }
 
 class _WebviewLoginPageState extends State<WebviewLoginPage> {
-  InAppWebViewController? _webCtrl;
-  bool _isLoading = true;
-  bool _extracting = false;
-  String? _error;
+  final _ctrl = XiaomiLoginController();
+  final _usernameCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  final _codeCtrl = TextEditingController();
 
-  // 登录入口 —— 不带 _json=true，让服务器返回 HTML 登录页
-  late final Uri _loginUrl = Uri.parse(
-    'https://account.xiaomi.com/pass/serviceLogin'
-    '?sid=xiaomiio'
-    '&callback=https%3A%2F%2Fsts.api.io.mi.com%2Fsts'
-    '&cc=%2B86',
-  );
+  bool _loading = false;
+  String? _error;
+  String? _phoneHint;
+  int _countdown = 0;
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl.events.listen(_onEvent);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    _timer?.cancel();
+    _usernameCtrl.dispose();
+    _passwordCtrl.dispose();
+    _codeCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onEvent(LoginEvent e) {
+    if (!mounted) return;
+    setState(() {
+      _loading = e.errorMessage == null && !e.isSuccess && !e.needCode;
+      _error = e.errorMessage;
+      if (e.needCode) {
+        _phoneHint = e.phone;
+        _countdown = e.countdown ?? 0;
+        _loading = false;
+        _startCountdown();
+      }
+      if (e.isSuccess) {
+        _loading = false;
+        widget.onLoginSuccess(e.serviceToken!, e.ssecurity!, e.userId ?? '');
+      }
+    });
+  }
+
+  void _startCountdown() {
+    _timer?.cancel();
+    _timer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (_countdown <= 0) {
+        t.cancel();
+        return;
+      }
+      if (!mounted) {
+        t.cancel();
+        return;
+      }
+      setState(() => _countdown--);
+    });
+  }
+
+  Future<void> _login() async {
+    if (_usernameCtrl.text.isEmpty || _passwordCtrl.text.isEmpty) {
+      setState(() => _error = '请输入账号和密码');
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    await _ctrl.login(
+      username: _usernameCtrl.text.trim(),
+      password: _passwordCtrl.text,
+    );
+  }
+
+  Future<void> _submitCode() async {
+    if (_codeCtrl.text.isEmpty) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    await _ctrl.submitCode(_codeCtrl.text.trim());
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('米家云登录')),
-      body: Stack(
-        children: [
-          InAppWebView(
-            initialSettings: InAppWebViewSettings(
-              useShouldOverrideUrlLoading: true,
-              mediaPlaybackRequiresUserGesture: false,
-              javaScriptEnabled: true,
-              domStorageEnabled: true,
-              cacheEnabled: true,
-            ),
-            initialUrlRequest: URLRequest(url: WebUri(_loginUrl.toString())),
-            onWebViewCreated: (ctrl) => _webCtrl = ctrl,
-            onLoadStart: (_, __) => setState(() {
-              _isLoading = true;
-              _error = null;
-            }),
-            onLoadStop: (_, url) async {
-              setState(() => _isLoading = false);
-              final urlStr = url?.toString() ?? '';
-              if (urlStr.contains('sts.api.io.mi.com')) {
-                await _extractTokens();
-              }
-            },
-            shouldOverrideUrlLoading: (_, action) async {
-              final url = action.request.url?.toString() ?? '';
-              if (url.contains('sts.api.io.mi.com')) {
-                await Future.delayed(const Duration(milliseconds: 500));
-                await _extractTokens();
-                return NavigationActionPolicy.CANCEL;
-              }
-              return NavigationActionPolicy.ALLOW;
-            },
-            onReceivedError: (_, req, err) {
-              final isMain = req != null &&
-                  (req.isForMainFrame ?? true);
-              if (isMain) {
-                setState(() => _error = err.description);
-              }
-            },
-          ),
-          if (_isLoading && !_extracting)
-            const Center(child: CircularProgressIndicator()),
-          if (_extracting)
-            Container(
-              color: Colors.black.withOpacity(0.7),
-              child: const Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: Colors.white),
-                    SizedBox(height: 12),
-                    Text('正在提取登录凭据...',
-                        style: TextStyle(color: Colors.white, fontSize: 16)),
-                  ],
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Icon(Icons.cloud_login, size: 64, color: Colors.blue),
+              const SizedBox(height: 16),
+              const Text(
+                '登录你的米家账号',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 24),
+
+              // 用户名密码表单
+              if (_phoneHint == null) ...[
+                TextField(
+                  controller: _usernameCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '账号 (手机号/邮箱)',
+                    prefixIcon: Icon(Icons.person),
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.text,
+                  enabled: !_loading,
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _passwordCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '密码',
+                    prefixIcon: Icon(Icons.lock),
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  enabled: !_loading,
+                ),
+                const SizedBox(height: 24),
+                FilledButton(
+                  onPressed: _loading ? null : _login,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Text('登录'),
+                ),
+              ],
+
+              // 2FA 验证码表单
+              if (_phoneHint != null) ...[
+                Text(
+                  '验证码已发送到 $_phoneHint',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.grey),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _codeCtrl,
+                  decoration: const InputDecoration(
+                    labelText: '6 位验证码',
+                    prefixIcon: Icon(Icons.sms),
+                    border: OutlineInputBorder(),
+                  ),
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  enabled: !_loading,
+                ),
+                const SizedBox(height: 12),
+                FilledButton(
+                  onPressed: _loading ? null : _submitCode,
+                  style: FilledButton.styleFrom(
+                    minimumSize: const Size(double.infinity, 48),
+                  ),
+                  child: _loading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white),
+                        )
+                      : Text(_countdown > 0
+                          ? '提交验证码 ($_countdown)'
+                          : '提交验证码'),
+                ),
+              ],
+
+              if (_error != null) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.error_outline, color: Colors.red),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _error!,
+                          style: const TextStyle(color: Colors.red),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 24),
+              Text(
+                '提示：登录成功后，凭证会自动保存并可一键导出到 Windows 端',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
               ),
-            ),
-          if (_error != null)
-            Positioned(
-              top: 0, left: 0, right: 0,
-              child: Container(
-                color: Colors.red.shade700,
-                padding: const EdgeInsets.all(8),
-                child: Text('加载错误: $_error',
-                    style: const TextStyle(color: Colors.white)),
-              ),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
-  }
-
-  Future<void> _extractTokens() async {
-    if (_extracting || _webCtrl == null) return;
-    setState(() => _extracting = true);
-
-    try {
-      final cookies = await CookieManager.instance()
-          .getCookies(url: WebUri('https://account.xiaomi.com'));
-
-      final cookieMap = <String, String>{};
-      for (final c in cookies) {
-        if (c.name != null && c.value != null) {
-          cookieMap[c.name!] = c.value!;
-        }
-      }
-
-      final serviceToken = cookieMap['serviceToken'] ?? '';
-      final userId = cookieMap['userId'] ?? '';
-
-      debugPrint('📋 WebView cookies (${cookieMap.length}): ${cookieMap.keys.join(", ")}');
-      debugPrint('🔑 serviceToken=${serviceToken.isNotEmpty ? serviceToken.substring(0, serviceToken.length > 12 ? 12 : serviceToken.length) + "..." : "MISSING"}');
-      debugPrint('👤 userId=$userId');
-
-      if (serviceToken.isEmpty || userId.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('未检测到登录凭据，请确认已完成登录')),
-        );
-        setState(() => _extracting = false);
-        return;
-      }
-
-      final ssecurity = await _fetchSsecurity();
-
-      if (!mounted) return;
-
-      if (ssecurity.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('ssecurity 获取失败，请重试')),
-        );
-        setState(() => _extracting = false);
-        return;
-      }
-
-      widget.onLoginSuccess(serviceToken, ssecurity, userId);
-    } catch (e) {
-      debugPrint('❌ Extract error: $e');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('提取失败: $e')),
-      );
-      setState(() => _extracting = false);
-    }
-  }
-
-  Future<String> _fetchSsecurity() async {
-    final result = await _webCtrl?.evaluateJavascript(source: '''
-(function() {
-  return fetch('/pass/serviceLogin?sid=xiaomiio&_json=true&cc=%2B86', {
-    credentials: 'include',
-    headers: {'Accept': 'application/json, text/plain, */*'}
-  }).then(function(r) { return r.text(); })
-    .catch(function(e) { return 'ERR:' + e.message; });
-})()
-''');
-
-    if (result == null) {
-      debugPrint('❌ evaluateJavascript returned null');
-      return '';
-    }
-
-    final text = result.toString();
-    if (text.startsWith('ERR:')) {
-      debugPrint('❌ JS fetch error: $text');
-      return '';
-    }
-
-    debugPrint('📡 JS fetch raw (first 200): ${text.substring(0, text.length > 200 ? 200 : text.length)}');
-
-    var body = text;
-    if (body.startsWith('&&&START&&&')) body = body.substring(11);
-    if (body.endsWith('&&&END&&&')) body = body.substring(0, body.length - 9);
-
-    try {
-      final map = jsonDecode(body) as Map<String, dynamic>;
-      final ssec = map['ssecurity']?.toString() ?? '';
-      debugPrint('${ssec.isNotEmpty ? "✅" : "❌"} ssecurity: ${ssec.isNotEmpty ? ssec.substring(0, ssec.length > 12 ? 12 : ssec.length) + "..." : "NOT FOUND in response"}');
-      return ssec;
-    } catch (e) {
-      debugPrint('❌ JSON parse error: $e');
-      return '';
-    }
-  }
-
-  @override
-  void dispose() {
-    _webCtrl?.dispose();
-    super.dispose();
   }
 }
