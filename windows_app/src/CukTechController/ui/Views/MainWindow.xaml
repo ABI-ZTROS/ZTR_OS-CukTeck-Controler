@@ -5,7 +5,7 @@
         xmlns:c="clr-namespace:CukTechController.Controls"
         Title="酷态科控制器" Height="760" Width="1020"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BgBackgroundColor}">
+        Background="{StaticResource BackgroundBrush}">
 
     <!-- 深色主题全局 -->
     <FrameworkElement.Resources>
@@ -41,7 +41,7 @@
                 <!-- 左：Logo + 标题 -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Ellipse Width="10" Height="10" Margin="0,0,8,0"
-                             Fill="{StaticResource AccentGreen}"/>
+                             Fill="{StaticResource ConnectedBrush}"/>
                     <TextBlock Text="酷态科 CukTech" FontSize="16" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
                 </StackPanel>
