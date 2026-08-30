@@ -10,14 +10,15 @@
     </windowsSettings>
   </application>
 
-  <!-- Win11 声明 — 这是获得 DWM 现代效果（Mica/圆角/深色标题栏）的前提 -->
+  <!-- 系统兼容性声明 — Win11 获得 DWM 现代效果的前提 -->
+  <!-- 参考: https://learn.microsoft.com/windows/win32/sysinfo/targeting-your-application-at-windows-8-1 -->
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
-      <!-- Win11 22H2+ (22621) — 获得 Mica + 圆角支持 -->
-      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
-      <!-- Win10 1809+ (17763) — 获得深色标题栏支持 -->
+      <!-- Win11 22H2+ (build 22621) — Mica + 窗口圆角 可用 -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}" />
+      <!-- Win10 1809+ (build 17763) — 深色标题栏 (ImmersiveDarkMode) -->
       <supportedOS Id="{9f7612dd-80e0-4b55-96bd-c06b51d87780}" />
-      <!-- Win10 1507+ (10240) — 基础 Win10 支持 -->
+      <!-- Win10 1507+ (build 10240) — 基础 Win10 支持 -->
       <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
     </application>
   </compatibility>
