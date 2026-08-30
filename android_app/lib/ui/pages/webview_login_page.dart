@@ -1,7 +1,7 @@
 import 'dart:async';
-import 'dart:developer';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../utils/logger/logger.dart';
 import '../../utils/xiaomi_cloud/webview_login.dart';
 
@@ -151,7 +151,7 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
         title: const Text('米家云登录'),
         actions: [
           IconButton(
-            icon: Icon(_showDebug ? Icons.terminal : Icons.terminal_badged),
+            icon: Icon(_showDebug ? Icons.terminal : Icons.computer),
             tooltip: '调试面板',
             onPressed: () => setState(() => _showDebug = !_showDebug),
           ),
