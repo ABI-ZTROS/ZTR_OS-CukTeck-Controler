@@ -1,8 +1,8 @@
 import 'constants.dart';
 
 /// 端口状态模型
-class PortState {
-  PortState({
+class PortSnapshot {
+  PortSnapshot({
     required this.portIndex,
     this.voltage = 0.0,
     this.current = 0.0,
@@ -18,8 +18,8 @@ class PortState {
   bool isCharging;
   String protocol;
 
-  factory PortState.fromJson(Map<String, dynamic> json) {
-    return PortState(
+  factory PortSnapshot.fromJson(Map<String, dynamic> json) {
+    return PortSnapshot(
       portIndex: json['portIndex'] as int? ?? 0,
       voltage: (json['voltage'] as num?)?.toDouble() ?? 0.0,
       current: (json['current'] as num?)?.toDouble() ?? 0.0,
@@ -51,7 +51,7 @@ class ChargerState {
     this.inputPower = 0.0,
     this.temperature = 0,
     this.portCount = 4,
-    this.ports = const <PortState>[],
+    this.ports = const <PortSnapshot>[],
     this.isConnected = false,
   });
 
@@ -60,7 +60,7 @@ class ChargerState {
   double inputPower;
   int temperature;
   int portCount;
-  List<PortState> ports;
+  List<PortSnapshot> ports;
   bool isConnected;
 
   factory ChargerState.fromJson(Map<String, dynamic> json) {
@@ -72,7 +72,7 @@ class ChargerState {
       temperature: json['temperature'] as int? ?? 0,
       portCount: json['portCount'] as int? ?? 4,
       ports: portList
-          .map((dynamic e) => PortState.fromJson(e as Map<String, dynamic>))
+          .map((dynamic e) => PortSnapshot.fromJson(e as Map<String, dynamic>))
           .toList(),
       isConnected: json['isConnected'] as bool? ?? false,
     );
@@ -84,7 +84,7 @@ class ChargerState {
     'inputPower': inputPower,
     'temperature': temperature,
     'portCount': portCount,
-    'ports': ports.map((PortState e) => e.toJson()).toList(),
+    'ports': ports.map((PortSnapshot e) => e.toJson()).toList(),
     'isConnected': isConnected,
   };
 }
