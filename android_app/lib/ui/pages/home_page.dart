@@ -8,7 +8,6 @@
 ///   - 功率环 sweep 0→full
 ///   - 4 按钮 stagger 50ms 依次入场
 ///   - 连接成功 → 弹性微放大
-library;
 
 import 'dart:async';
 import 'dart:math' as math;
