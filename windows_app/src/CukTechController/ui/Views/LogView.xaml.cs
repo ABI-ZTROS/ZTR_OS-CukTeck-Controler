@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Windows;
 using CukTechController.Ble;
+using CukTechController.UI.Native;
 using CukTechController.Utils;
 
 namespace CukTechController.Views
@@ -17,6 +18,7 @@ namespace CukTechController.Views
         public LogView()
         {
             InitializeComponent();
+            this.AttachColorOSVisualPack();
             Loaded += OnLoaded;
             AppLogger.Instance.D("LogView", "initialized");
         }

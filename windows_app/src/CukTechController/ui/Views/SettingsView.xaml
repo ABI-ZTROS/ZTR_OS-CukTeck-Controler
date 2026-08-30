@@ -4,9 +4,10 @@
         Title="设备设置"
         Height="600" Width="440"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource BackgroundBrush}">
+        Background="Transparent">
 
-    <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <ScrollViewer VerticalScrollBarVisibility="Auto"
+                  Background="{StaticResource BackgroundBrush}">
         <StackPanel Margin="16">
             <TextBlock Text="设备设置"
                        FontSize="20" FontWeight="Bold"

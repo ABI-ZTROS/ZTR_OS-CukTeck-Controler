@@ -17,6 +17,8 @@
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <!-- WPF 明确不支持 trimming (NETSDK1168) -->
     <PublishTrimmed>false</PublishTrimmed>
+    <!-- Win11 app.manifest — 启用 Mica/圆角/深色标题栏/PerMonitorV2 -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
 
   <ItemGroup>

@@ -107,15 +107,29 @@ public sealed class WindowEffectsService
     // ──────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// 一键套上 ColorOS 美学：深色标题栏 + 小圆角 + Mica 背景
+    /// 一键套上 ColorOS 美学：Mica 背景 + 深色标题栏 + 小圆角
+    /// 必须在 SourceInitialized 事件中调用（Hwnd 已创建但还没渲染）
     /// </summary>
     public void ApplyColorOSVisualPack(IntPtr hWnd, bool darkTitleBar = true)
     {
         if (hWnd == IntPtr.Zero) return;
 
+        // 1. 先扩展框架到客户区（Mica 必须！）
+        // -1 = 完全扩展（覆盖整个客户区，让 DWM 绘制背景）
+        try
+        {
+            var margins = new NativeMethods.MARGINS(-1);
+            NativeMethods.DwmExtendFrameIntoClientArea(hWnd, ref margins);
+        }
+        catch { /* 忽略，非致命 */ }
+
+        // 2. 深色标题栏（Win10 1809+）
         ApplyDarkTitleBar(hWnd, darkTitleBar);
+
+        // 3. 小圆角（Win11）
         ApplyCornerPreference(hWnd, WindowCornerPreference.RoundSmall);
 
+        // 4. Mica 背景（Win11 22H2+）
         if (SupportsMica && IsCompositionEnabled)
             ApplySystemBackdrop(hWnd, SystemBackdropType.MainWindow);
 

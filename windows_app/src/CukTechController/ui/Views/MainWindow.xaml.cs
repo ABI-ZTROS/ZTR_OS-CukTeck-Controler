@@ -24,7 +24,9 @@ public partial class MainWindow : Window
         DataContext = new MainViewModel();
         _vm = (MainViewModel)DataContext;
 
-        // ═══ Show 后应用 ColorOS VisualPack + 入场动画 ═══
+        // ═══ VisualPack 在 SourceInitialized 调用（Hwnd 刚创建，最佳时机）═══
+        // Loaded 事件中只做入场动画
+        SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
 
         // 订阅 ViewModel 事件
@@ -40,24 +42,26 @@ public partial class MainWindow : Window
         };
     }
 
+    private void MainWindow_SourceInitialized(object? sender, EventArgs e)
+    {
+        // 应用 ColorOS VisualPack（Mica + 深色标题栏 + 小圆角）
+        // SourceInitialized = HwndSource 已创建，是调 DwmSetWindowAttribute 的最佳时机
+        try
+        {
+            var hWnd = new WindowInteropHelper(this).EnsureHandle();
+            ((App)Application.Current).ApplyColorOSToWindow(hWnd);
+            _visualPackApplied = true;
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[MAIN] ColorOS VisualPack 应用失败");
+        }
+    }
+
     private void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // 1. 应用 ColorOS VisualPack (Mica/深色标题栏/小圆角)
-        if (!_visualPackApplied)
-        {
-            try
-            {
-                var hWnd = new WindowInteropHelper(this).EnsureHandle();
-                ((App)Application.Current).ApplyColorOSToWindow(hWnd);
-                _visualPackApplied = true;
-            }
-            catch (Exception ex)
-            {
-                Log.Warning(ex, "[MAIN] ColorOS VisualPack 应用失败");
-            }
-        }
-
-        // 2. ColorOS 入场动画（淡入 + 从下方滑入）
+        // ColorOS 入场动画（淡入 + 从下方滑入）
+        // 注意：只动画 Window.Content（内部 Grid），不能动画 Window 本身
         AnimationHelper.PlayPageEntrance(this, durationMs: 400, slideDistance: 24);
     }
 

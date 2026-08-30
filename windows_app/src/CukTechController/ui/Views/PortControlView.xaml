@@ -4,9 +4,9 @@
         Title="端口控制"
         Height="650" Width="420"
         WindowStartupLocation="CenterOwner"
-        Background="{StaticResource BackgroundBrush}">
+        Background="Transparent">
 
-    <Grid Margin="16">
+    <Grid Margin="16" Background="{StaticResource BackgroundBrush}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>

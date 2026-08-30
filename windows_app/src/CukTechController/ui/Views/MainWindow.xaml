@@ -5,12 +5,12 @@
         xmlns:c="clr-namespace:CukTechController.Controls"
         Title="酷态科控制器" Height="760" Width="1020"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource BackgroundBrush}">
+        Background="Transparent"
+        UseLayoutRounding="True"
+        TextOptions.TextFormattingMode="Display">
 
-    <!-- 深色主题全局 -->
-    
-
-    <Grid>
+    <!-- 主容器：不透明深色主题，叠加在 Mica 效果之上 -->
+    <Grid Background="{StaticResource BackgroundBrush}">
         <!-- ===== 顶部状态栏 ===== -->
         <Grid.RowDefinitions>
             <RowDefinition Height="56"/>

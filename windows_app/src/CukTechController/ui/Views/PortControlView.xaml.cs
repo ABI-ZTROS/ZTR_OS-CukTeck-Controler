@@ -1,4 +1,5 @@
 using System.Windows;
+using CukTechController.UI.Native;
 using CukTechController.ViewModels;
 
 namespace CukTechController.Views
@@ -11,6 +12,7 @@ namespace CukTechController.Views
         {
             InitializeComponent();
             DataContext = new PortControlViewModel(piid);
+            this.AttachColorOSVisualPack();
         }
     }
 }

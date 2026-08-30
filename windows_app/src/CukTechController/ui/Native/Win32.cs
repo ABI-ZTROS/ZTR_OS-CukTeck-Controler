@@ -57,6 +57,29 @@ internal static class NativeMethods
     public static extern int DwmIsCompositionEnabled(
         [MarshalAs(UnmanagedType.Bool)] out bool pfEnabled);
 
+    /// <summary>
+    /// DwmExtendFrameIntoClientArea — 将窗口框架扩展到客户区
+    /// Mica/Acrylic 生效的前提，因为效果绘制在扩展后的客户区上
+    /// </summary>
+    [DllImport("dwmapi.dll", PreserveSig = true)]
+    public static extern int DwmExtendFrameIntoClientArea(
+        [In] IntPtr hwnd,
+        [In] ref MARGINS pMarInset);
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct MARGINS
+    {
+        public int cxLeftWidth;
+        public int cxRightWidth;
+        public int cyTopHeight;
+        public int cyBottomHeight;
+
+        public MARGINS(int all)
+        {
+            cxLeftWidth = cxRightWidth = cyTopHeight = cyBottomHeight = all;
+        }
+    }
+
     // ───── user32 ─────
 
     [DllImport("user32.dll", SetLastError = true)]
