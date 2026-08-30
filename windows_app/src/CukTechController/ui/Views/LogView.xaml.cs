@@ -70,7 +70,8 @@ namespace CukTechController.Views
                 // 读取所有 Serilog 滚动日志文件
                 var sb = new StringBuilder();
                 var files = Directory.GetFiles(logDir, "cuktech*.log")
-                    .OrderBy(f => f.EndsWith(".log") ? 0 : int.TryParse(Path.GetExtension(f).TrimStart('.'), out var n) ? n : 999);
+                    .OrderBy(f => f.EndsWith(".log") ? 0 : int.TryParse(Path.GetExtension(f).TrimStart('.'), out var n) ? n : 999)
+                    .ToArray();
 
                 if (files.Length == 0)
                 {

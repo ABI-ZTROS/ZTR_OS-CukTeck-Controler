@@ -10,6 +10,7 @@ using System.Windows;
 using System.Windows.Threading;
 using CukTechController.Protocol;
 using CukTechController.UI.Native;
+using CukTechController.Utils;
 using CukTechController.Views;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
