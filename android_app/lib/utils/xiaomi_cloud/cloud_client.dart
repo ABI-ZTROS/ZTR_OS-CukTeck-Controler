@@ -212,4 +212,5 @@ class XiaomiCloudClient {
     _location = '';
     _isLoggedIn = false;
     AppLogger.instance.i('XiaomiCloudClient', 'Logged out');
+  }
 }

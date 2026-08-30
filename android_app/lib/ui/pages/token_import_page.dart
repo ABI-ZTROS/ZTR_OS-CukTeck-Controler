@@ -49,28 +49,10 @@ class _TokenImportPageState extends State<TokenImportPage> {
     }
   }
 
+  /// 跳转云登录（原 Root miio2.db 扫描已被云登录替代）
   Future<void> _startScan() async {
-    setState(() {
-      _mode = _PageMode.scanning;
-      _devices = const [];
-      _errorCode = null;
-    });
-    try {
-      final r = await _svc.scanLocalDevices();
-      if (!mounted) return;
-      setState(() {
-        _devices = r.devices;
-        _errorCode = r.success ? null : r.errorCode;
-        _mode = r.success ? _PageMode.scanResult : _PageMode.scanError;
-      });
-    } catch (e, stackTrace) {
-      AppLogger.instance.e('TokenImportPage', 'scan error: $e');
-      if (!mounted) return;
-      setState(() {
-        _errorCode = MiioDbErrors.parseError;
-        _mode = _PageMode.scanError;
-      });
-    }
+    if (!mounted) return;
+    setState(() => _mode = _PageMode.cloud);
   }
 
   Future<void> _selectAndSave(MiioDevice device) async {
@@ -163,7 +145,7 @@ class _TokenImportPageState extends State<TokenImportPage> {
             onSwitchManual: () => setState(() => _mode = _PageMode.manual),
           ),
         _PageMode.scanError => ScanErrorPanel(
-            errorCode: _errorCode ?? MiioDbErrors.parseError,
+            errorCode: _errorCode ?? '',
             onRetry: _startScan,
             onDowngrade: _openDowngradeGuide,
             onManual: () => setState(() => _mode = _PageMode.manual),
