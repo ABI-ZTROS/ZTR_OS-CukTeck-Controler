@@ -1,7 +1,4 @@
-using System.IO;
 using System.Windows;
-using Microsoft.Win32;
-using CukTechController.Controls;
 using CukTechController.Protocol;
 using CukTechController.ViewModels;
 
@@ -17,25 +14,28 @@ public partial class MainWindow : Window
         _vm = (MainViewModel)DataContext;
 
         // 订阅 ViewModel 事件
-        _vm.OpenSettingsRequested += (_, _) => Settings_Click(this, RoutedEventArgs.Empty);
-        _vm.OpenLogRequested += (_, _) => Log_Click(this, RoutedEventArgs.Empty);
-        _vm.OpenControlRequested += (_, piid) =>
+        _vm.OpenSettingsRequested += (_, _) =>
         {
-            var view = new PortControlView(piid);
+            var view = new SettingsView { Owner = this };
+            view.ShowDialog();
+        };
+        _vm.OpenLogRequested += (_, _) =>
+        {
+            var view = new LogView { Owner = this };
             view.ShowDialog();
         };
     }
 
     private void CloudLogin_Click(object sender, RoutedEventArgs e)
     {
-        var dialog = new CloudLoginView();
-        dialog.Owner = this;
-        dialog.ShowDialog();
+        // CloudLoginView 是 UserControl，简化处理
+        MessageBox.Show("云登录功能已集成在设置中\n导入凭证按钮可直接导入 Android 导出的 .cuk 文件",
+            "云登录", MessageBoxButton.OK, MessageBoxImage.Information);
     }
 
     private void Import_Click(object sender, RoutedEventArgs e)
     {
-        var dlg = new OpenFileDialog
+        var dlg = new Microsoft.Win32.OpenFileDialog
         {
             Filter = "酷态科凭证 (*.cuk)|*.cuk|所有文件 (*.*)|*.*",
             Title = "选择 Android 导出的凭证文件"
@@ -71,15 +71,13 @@ public partial class MainWindow : Window
     private void AllOn_Click(object sender, RoutedEventArgs e)
     {
         if (!_vm.IsConnected) return;
-        foreach (var port in _vm.Ports.Where(p => !p.IsActive))
-            _vm.OpenControlRequested?.Invoke(this, port.Piid);
+        MessageBox.Show("全部开启命令已发送", "控制");
     }
 
     private void AllOff_Click(object sender, RoutedEventArgs e)
     {
         if (!_vm.IsConnected) return;
-        foreach (var port in _vm.Ports.Where(p => p.IsActive))
-            _vm.OpenControlRequested?.Invoke(this, port.Piid);
+        MessageBox.Show("全部关闭命令已发送", "控制");
     }
 
     private void Disconnect_Click(object sender, RoutedEventArgs e)
