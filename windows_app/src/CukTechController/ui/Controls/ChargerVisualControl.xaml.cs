@@ -54,7 +54,7 @@ public partial class ChargerVisualControl : UserControl
         {
             AutoReverse = true,
             RepeatBehavior = RepeatBehavior.Forever,
-            Easing = new CubicEase { EasingMode = EasingMode.EaseInOut },
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
         };
     }
 
@@ -95,7 +95,7 @@ public partial class ChargerVisualControl : UserControl
             {
                 AutoReverse = true,
                 RepeatBehavior = RepeatBehavior.Forever,
-                Easing = new CubicEase { EasingMode = EasingMode.EaseInOut },
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseInOut },
             };
             CenterEnergy.BeginAnimation(OpacityProperty, anim);
         }

@@ -110,7 +110,7 @@ public partial class PowerRingControl : UserControl
         // ColorOS Spring 弹性过渡
         var anim = new DoubleAnimation(_ringProgress, progress, TimeSpan.FromMilliseconds(400))
         {
-            Easing = new CubicEase { EasingMode = EasingMode.EaseOut },
+            EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
         };
         _ringProgress = progress;
 
