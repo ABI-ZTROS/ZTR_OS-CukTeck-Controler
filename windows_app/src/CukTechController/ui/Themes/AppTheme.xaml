@@ -36,13 +36,13 @@
     <!-- ===== ColorOS 动画 Easing ===== -->
     <!-- ColorOS FastOutSlowIn = Cubic(0.4, 0.0, 0.2, 1.0) -->
     <CubicEase x:Key="ColorOSStandardEase" EasingMode="EaseInOut"
-              CubicBezier="0.4, 0.0, 0.2, 1.0"/>
+/>
     <!-- ColorOS LinearOutSlowIn = Cubic(0.0, 0.0, 0.2, 1.0) -->
     <CubicEase x:Key="ColorOSEnterEase" EasingMode="EaseOut"
-              CubicBezier="0.0, 0.0, 0.2, 1.0"/>
+/>
     <!-- ColorOS FastOutLinearIn = Cubic(0.4, 0.0, 1.0, 1.0) -->
     <CubicEase x:Key="ColorOSExitEase" EasingMode="EaseIn"
-              CubicBezier="0.4, 0.0, 1.0, 1.0"/>
+/>
 
     <!-- ===== 默认 Button Style（ColorOS 柔性） ===== -->
     <Style TargetType="Button" x:Key="ColorOSButton">
