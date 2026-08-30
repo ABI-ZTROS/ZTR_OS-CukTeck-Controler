@@ -1,5 +1,4 @@
 /// 总功率环（环形进度 + 颜色映射）
-import "dart:math" as math;
 ///
 /// 功率映射：
 ///   0-60W   翡翠绿 #10B981
@@ -7,6 +6,8 @@ import "dart:math" as math;
 ///   120-180W 琥珀橙 #F59E0B
 ///   180W+    警示红 #EF4444
 library;
+
+import "dart:math" as math;
 
 import 'package:flutter/material.dart';
 

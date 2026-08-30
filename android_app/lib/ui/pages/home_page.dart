@@ -29,6 +29,7 @@ import '../widgets/charger_visual/charger_visual_widget.dart';
 import '../widgets/power_ring.dart';
 import '../widgets/port_radial_button.dart';
 import '../widgets/status_banner.dart';
+import '../widgets/port_control_sheet.dart';
 import 'device_info_page.dart';
 import 'log_page.dart';
 import 'settings_page.dart';
