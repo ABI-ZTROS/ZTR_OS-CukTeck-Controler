@@ -33,27 +33,48 @@ jobs:
           if [ -d android-app-custom/manifest/res ]; then
             cp -r android-app-custom/manifest/res/* android/app/src/main/res/
           fi
-      - name: Patch compileSdk to 33 (share_plus compat)
+      - name: Disable AGP AAR metadata check (share_plus android-33 vs compileSdk 36)
         working-directory: android_app
         run: |
-          # share_plus 7.2.2 built for android-33; AGP 8 rejects older AARs against compileSdk 34
+          # AGP 8's checkReleaseAarMetadata rejects libraries built for older platforms
+          # share_plus 7.2.2 compiled for android-33, flutter_blue_plus needs compileSdk 36
+          # Disable the check via gradle.properties flag
+          echo 'android.experimental.disableCompileSdkChecks=true' >> android/gradle.properties
+          # Also directly disable the task via app build.gradle.kts
           python3 - << 'PYPATCH'
-          import re, pathlib
-          for p in pathlib.Path('android').rglob('build.gradle*'):
-              t = p.read_text()
-              t2 = re.sub(r'compileSdk(?:Version)?\s*=\s*.+', 'compileSdk = 33', t)
-              if t2 != t:
-                  p.write_text(t2)
-                  print(f'Patched {p}')
-              else:
-                  print(f'No change in {p}')
+          import pathlib
+          p = pathlib.Path('android/app/build.gradle.kts')
+          t = p.read_text()
+          # Insert into android {} block
+          inject = """
+            // AGP 8 AAR metadata check: skip (share_plus built for android-33)
+            tasks.withType<com.android.build.gradle.tasks.CheckAarMetadata>().configureEach {
+                it.enabled = false
+            }
+          """
+          # Find android { ... } block and inject before its closing brace
+          marker = 'android {'
+          start = t.index(marker)
+          # Find matching closing brace by counting
+          depth = 0
+          i = start
+          while i < len(t):
+              if t[i] == '{': depth += 1
+              elif t[i] == '}':
+                  depth -= 1
+                  if depth == 0:
+                      # Found android block close
+                      t = t[:i] + inject + '\n' + t[i:]
+                      break
+              i += 1
+          p.write_text(t)
+          print('Patched build.gradle.kts')
+          print('=== gradle.properties ===')
+          print(pathlib.Path('android/gradle.properties').read_text())
           PYPATCH
-          echo "=== After patch ==="
-          grep -i compileSdk android/app/build.gradle.kts || echo "not found"
       - name: Patch flutter_inappwebview proguard
         run: |
           PUB_CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
-          echo "PUB_CACHE=$PUB_CACHE"
           find "$PUB_CACHE" -name "build.gradle" -path "*flutter_inappwebview_android*" 2>/dev/null | while read gradle_file; do
             echo "Patching: $gradle_file"
             sed -i "s|getDefaultProguardFile('proguard-android.txt')|getDefaultProguardFile('proguard-android-optimize.txt')|g" "$gradle_file"
