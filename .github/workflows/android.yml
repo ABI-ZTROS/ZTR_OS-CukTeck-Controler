@@ -44,15 +44,14 @@ jobs:
         working-directory: android_app
         run: |
           # share_plus 7.2.2 built for android-33; AGP 8 rejects older AARs against compileSdk 34
-          # Force compileSdk to 33 in both kts and gradle files, any format
+          # Flutter 3.27+ uses compileSdk = flutter.compileSdkVersion (variable = 34)
+          # Replace variable reference with hardcoded 33
           echo "=== Before patch ==="
-          grep -i "compileSdk" android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || echo "no match"
-          sed -i -E 's/(compileSdk|compileSdkVersion)[[:space:]]*=[[:space:]]*[0-9]+/\1 = 33/g' android/app/build.gradle.kts 2>/dev/null || true
-          sed -i -E 's/(compileSdk|compileSdkVersion)[[:space:]]*=[[:space:]]*[0-9]+/\1 = 33/g' android/app/build.gradle 2>/dev/null || true
-          # Also handle the "compileSdk 34" (no equals) Groovy style
-          sed -i -E 's/compileSdk[[:space:]]+[0-9]+/compileSdk = 33/g' android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || true
+          cat android/app/build.gradle.kts | grep -i "compileSdk"
+          # Replace anything after "compileSdk =" on that line (variable or number) with 33
+          sed -i -E 's/(compileSdk|compileSdkVersion)[[:space:]]*=[[:space:]]*.*/\1 = 33/g' android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || true
           echo "=== After patch ==="
-          grep -i "compileSdk" android/app/build.gradle.kts android/app/build.gradle 2>/dev/null || echo "no match" 
+          cat android/app/build.gradle.kts | grep -i "compileSdk" 
 
       - name: Patch flutter_inappwebview proguard compatibility
         run: |
