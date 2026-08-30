@@ -202,24 +202,25 @@ class XiaomiLoginController {
     _controller.add(LoginEvent.loading('正在初始化...'));
 
     try {
-      // Step 1: serviceLogin → 获取 _sign
-      // Python: self._session.get(url, cookies={"userId": self._username})
-      AppLogger.instance.i('XiaomiLogin', 'Step 1: serviceLogin');
+      _emitDebug('═══════ Step 1: serviceLogin ═══════');
       _sessionCookies['deviceId'] = _deviceId;
+      _emitDebug('GET /pass/serviceLogin cookies=[sdkVersion,deviceId,userId]');
 
       final r1 = await _get(
         'https://account.xiaomi.com/pass/serviceLogin',
         params: {'sid': 'xiaomiio', '_json': 'true', 'cc': '+86'},
-        extraCookies: {'userId': username}, // ⚠️ 和 Python 一致！
+        extraCookies: {'userId': username},
       );
       final d1 = _parseXiaomiJson(r1.body);
       final sign = d1['_sign'] as String;
       final nonce = d1['nonce'] as String? ?? '';
-      AppLogger.instance.d('XiaomiLogin', 'Got _sign, nonce=$nonce');
+      _emitDebug('  ↳ ${r1.statusCode} sign=${sign.substring(0, 20)}... (${sign.length} chars)');
+      _emitDebug('  ↳ session cookies now: [${_sessionCookies.keys.join(",")}]');
 
-      // Step 2: serviceLoginAuth2 → 密码验证
+      // Step 2
       _controller.add(LoginEvent.loading('正在验证密码...'));
-      AppLogger.instance.i('XiaomiLogin', 'Step 2: serviceLoginAuth2');
+      _emitDebug('═══════ Step 2: serviceLoginAuth2 ═══════');
+      _emitDebug('POST /pass/serviceLoginAuth2 hash=${_passwordHash.substring(0, 8)}...');
 
       final r2 = await _post(
         'https://account.xiaomi.com/pass/serviceLoginAuth2',
@@ -233,24 +234,25 @@ class XiaomiLoginController {
           '_json': 'true',
           'cc': '+86',
         },
-        extraCookies: {'userId': username}, // ⚠️ 和 Python 一致
+        extraCookies: {'userId': username},
       );
       final d2 = _parseXiaomiJson(r2.body);
       final secStatus = d2['securityStatus'] ?? d2['secStatus'] ?? 0;
 
-      AppLogger.instance.i('XiaomiLogin',
-          'Auth2: code=${d2['code']}, secStatus=$secStatus, '
-          'hasSsecurity=${d2.containsKey('ssecurity')}');
+      _emitDebug('  ↳ ${r2.statusCode} code=${d2['code']} secStatus=$secStatus');
+      _emitDebug('  ↳ ALL keys: [${d2.keys.join(",")}]');
+      _emitDebug('  ↳ has ssecurity=${d2.containsKey('ssecurity')}');
 
       if (d2['code'] != 0) {
         final desc = d2['desc'] ?? d2['description'] ?? '登录失败';
-        AppLogger.instance.e('XiaomiLogin', 'Auth2 FAILED: $desc');
+        _emitDebug('❌ Step 2 FAILED: $desc');
+        _emitDebug('   Full resp: ${_truncate(r2.body, 400)}');
         _controller.add(LoginEvent.error(desc));
         return;
       }
 
       if (secStatus == 0 && d2.containsKey('ssecurity')) {
-        // ✅ 无需 2FA，直接成功
+        _emitDebug('  ✅ 无需2FA，直接拿 ssecurity');
         await _completeLogin(
           d2['ssecurity'] as String,
           d2['location'] as String,
@@ -261,13 +263,15 @@ class XiaomiLoginController {
       }
 
       if (secStatus == 16 || secStatus == null) {
-        // 需要 2FA
+        _emitDebug('  → 需要2FA (secStatus=$secStatus)');
         await _handle2FA(d2);
         return;
       }
 
+      _emitDebug('❌ 未知 secStatus=$secStatus');
       _controller.add(LoginEvent.error('未知登录状态 (secStatus=$secStatus)'));
     } catch (e, stackTrace) {
+      _emitDebug('❌ Exception: $e');
       AppLogger.instance.e('XiaomiLogin', 'Login error: $e', stackTrace);
       _controller.add(LoginEvent.error('网络错误: $e'));
     }
@@ -280,15 +284,17 @@ class XiaomiLoginController {
     final context = uri.queryParameters['context'] ?? '';
     _context = context;
 
-    AppLogger.instance.i('XiaomiLogin',
-        'Need 2FA, context=${_truncate(context, 40)}');
+    _emitDebug('═══════ 2FA 流程 ═══════');
+    _emitDebug('notificationUrl=${_truncate(notifUrl, 80)}');
+    _emitDebug('context=${_truncate(context, 40)}');
 
     // Step 3: authStart
+    _emitDebug('Step 3: authStart (GET $notifUrl)');
     final r3 = await _get(notifUrl);
-    AppLogger.instance.d('XiaomiLogin',
-        'Step 3 authStart: status=${r3.statusCode}');
+    _emitDebug('  ↳ ${r3.statusCode}, cookies=[${_sessionCookies.keys.join(",")}]');
 
     // Step 4: identity/list → 获取验证方式
+    _emitDebug('Step 4: identity/list');
     final r4 = await _get('https://account.xiaomi.com/identity/list', params: {
       'sid': 'xiaomiio',
       'supportedMask': '0',
@@ -296,18 +302,20 @@ class XiaomiLoginController {
       'context': context,
     });
     final d4 = _parseXiaomiJson(r4.body);
-    _authFlag = d4['flag'] ?? 4; // 保存，submitCode 要用！
+    _authFlag = d4['flag'] ?? 4;
     final maskedPhone = d4['maskedPhone'] as String? ?? '';
-    AppLogger.instance.i('XiaomiLogin',
-        '2FA method flag=$_authFlag, phone=$maskedPhone');
+    _emitDebug('  ↳ ${r4.statusCode} flag=$_authFlag phone=$maskedPhone');
+    _emitDebug('  ↳ session cookies: [${_sessionCookies.keys.join(",")}]');
 
-    // Step 5: verifyPhone（GET）
+    // Step 5
+    _emitDebug('Step 5: verifyPhone GET');
     await _get(
       'https://account.xiaomi.com/identity/auth/verifyPhone',
       params: {'_flag': '$_authFlag', '_json': 'true'},
     );
 
-    // Step 6: sendPhoneTicket
+    // Step 6
+    _emitDebug('Step 6: sendPhoneTicket');
     final r6 = await _post(
       'https://account.xiaomi.com/identity/auth/sendPhoneTicket',
       params: {
@@ -320,19 +328,20 @@ class XiaomiLoginController {
     );
     final d6 = _parseXiaomiJson(r6.body);
     final wt = d6['data']?['wt'] as int? ?? 0;
+    _emitDebug('  ↳ ${r6.statusCode} code=${d6['code']} wt=$wt');
 
     if (d6['code'] != 0) {
       final errMsg = d6['tips']?.toString() ??
           d6['desc']?.toString() ??
           '发送验证码失败';
-      AppLogger.instance.e('XiaomiLogin',
-          'sendPhoneTicket FAILED: code=${d6['code']}, msg=$errMsg');
+      _emitDebug('❌ Step 6 FAILED: code=${d6['code']} msg=$errMsg');
+      _emitDebug('   Full: ${_truncate(r6.body, 300)}');
       _controller.add(LoginEvent.error('发送验证码失败($errMsg)'));
       return;
     }
 
     _controller.add(LoginEvent.needCode(maskedPhone, wt));
-    AppLogger.instance.i('XiaomiLogin', 'SMS sent! wt=${wt}s');
+    _emitDebug('✅ SMS sent! wt=${wt}s, waiting for user...');
   }
 
   Future<void> submitCode(String code) async {
@@ -343,9 +352,9 @@ class XiaomiLoginController {
 
     try {
       _controller.add(LoginEvent.loading('正在验证验证码...'));
+      _emitDebug('═══════ Step 7: verifyPhone submit ═══════');
+      _emitDebug('_authFlag=$_authFlag, code=*** (${code.length} digits)');
 
-      // Step 7: POST verifyPhone — 提交验证码
-      // ⚠️ 用 _authFlag（从 Step 4 动态获取），不是硬编码！
       final r7 = await _post(
         'https://account.xiaomi.com/identity/auth/verifyPhone',
         params: {
@@ -357,31 +366,35 @@ class XiaomiLoginController {
         },
       );
       final d7 = _parseXiaomiJson(r7.body);
-      AppLogger.instance.i('XiaomiLogin',
-          'Step 7 verifyPhone: code=${d7['code']}, '
-          'hasLocation=${d7.containsKey('location')}, '
-          'desc=${d7['desc'] ?? ""}');
+      _emitDebug('  ↳ ${r7.statusCode} code=${d7['code']} hasLocation=${d7.containsKey('location')}');
+      _emitDebug('  ↳ ALL keys: [${d7.keys.join(",")}]');
 
       if (d7['code'] != 0 || !d7.containsKey('location')) {
         final msg = d7['desc']?.toString() ?? '验证码错误';
+        _emitDebug('❌ Step 7 FAILED: $msg');
+        _emitDebug('   Full: ${_truncate(r7.body, 300)}');
         _controller.add(LoginEvent.error(msg));
         return;
       }
 
-      // Step 8: Follow location — 更新 identity_session / passToken
+      // Step 8
       var location = d7['location'] as String;
       if (!location.startsWith('http')) {
         location = 'https://account.xiaomi.com$location';
       }
+      _emitDebug('═══════ Step 8: follow location ═══════');
+      _emitDebug('GET ${_truncate(location, 80)}');
       final r8 = await _get(location);
-      AppLogger.instance.i('XiaomiLogin',
-          'Step 8 followLocation: status=${r8.statusCode}, '
-          'cookies=${_sessionCookies.keys.join(",")}');
+      _emitDebug('  ↳ ${r8.statusCode}');
+      _emitDebug('  ↳ session cookies NOW: [${_sessionCookies.keys.join(",")}]');
 
-      // Step 8.5: ⚠️ 清理 cookies！关键！否则 auth2 只返回 psecurity
+      // Step 8.5: CLEAN
+      _emitDebug('═══════ Step 8.5: CLEAN cookies ═══════');
       _cleanForSsecurity();
+      _emitDebug('  ↳ AFTER CLEAN: [${_sessionCookies.keys.join(",")}]');
 
-      // Step 9: serviceLogin → fresh _sign
+      // Step 9
+      _emitDebug('═══════ Step 9: fresh serviceLogin ═══════');
       final r9 = await _get(
         'https://account.xiaomi.com/pass/serviceLogin',
         params: {'sid': 'xiaomiio', '_json': 'true', 'cc': '+86'},
@@ -389,13 +402,14 @@ class XiaomiLoginController {
       final d9 = _parseXiaomiJson(r9.body);
       final sign = d9['_sign'] as String;
       final nonce = d9['nonce'] as String? ?? '';
-      AppLogger.instance.i('XiaomiLogin',
-          'Step 9 fresh sign: ${_truncate(sign, 20)}..., '
-          'hasSsec=${d9.containsKey('ssecurity')}, '
-          'hasPsec=${d9.containsKey('psecurity')}');
+      _emitDebug('  ↳ ${r9.statusCode} sign len=${sign.length}');
+      _emitDebug('  ↳ has ssecurity=${d9.containsKey('ssecurity')} has psecurity=${d9.containsKey('psecurity')}');
+      _emitDebug('  ↳ ALL keys: [${d9.keys.join(",")}]');
 
-      // Step 10: 关键！重新 auth2 → 拿 ssecurity
+      // Step 10 — THE CRITICAL ONE
       _controller.add(LoginEvent.loading('正在完成登录...'));
+      _emitDebug('═══════ Step 10: serviceLoginAuth2 (FINAL!) ═══════');
+      _emitDebug('POST /pass/serviceLoginAuth2 with fresh sign');
       final r10 = await _post(
         'https://account.xiaomi.com/pass/serviceLoginAuth2',
         params: {
@@ -410,12 +424,12 @@ class XiaomiLoginController {
         },
       );
       final d10 = _parseXiaomiJson(r10.body);
-      AppLogger.instance.i('XiaomiLogin',
-          'Step 10 auth2: code=${d10['code']}, '
-          'secStatus=${d10['securityStatus']}, '
-          'hasSsec=${d10.containsKey('ssecurity')}');
+      _emitDebug('  ↳ ${r10.statusCode} code=${d10['code']} secStatus=${d10['securityStatus']}');
+      _emitDebug('  ↳ has ssecurity=${d10.containsKey('ssecurity')} has psecurity=${d10.containsKey('psecurity')}');
+      _emitDebug('  ↳ ALL keys: [${d10.keys.join(",")}]');
 
       if (d10.containsKey('ssecurity')) {
+        _emitDebug('  ✅ GOT SSECURITY! Proceeding...');
         await _completeLogin(
           d10['ssecurity'] as String,
           d10['location'] as String,
@@ -423,12 +437,16 @@ class XiaomiLoginController {
           nonce,
         );
       } else {
-        AppLogger.instance.e('XiaomiLogin',
-            'Step 10 no ssecurity! Full resp: ${_truncate(r10.body, 500)}');
-        _controller.add(LoginEvent.error('无法获取登录凭据，请重试'));
+        _emitDebug('❌ Step 10 NO SSECURITY! This is the bug.');
+        _emitDebug('   Full response: ${_truncate(r10.body, 500)}');
+        _emitDebug('   Session cookies: [${_sessionCookies.keys.join(",")}]');
+        _emitDebug('   identity_session present? ${_sessionCookies.containsKey('identity_session')}');
+        _emitDebug('   passToken present? ${_sessionCookies.containsKey('passToken')}');
+        _controller.add(LoginEvent.error('无法获取登录凭据（Step 10 失败）。请查看调试日志'));
       }
       _context = null;
     } catch (e, stackTrace) {
+      _emitDebug('❌ Exception: $e');
       AppLogger.instance.e('XiaomiLogin', 'Submit code error: $e', stackTrace);
       _controller.add(LoginEvent.error('验证失败: $e'));
     }
@@ -489,6 +507,11 @@ class XiaomiLoginController {
         .add(LoginEvent.success(serviceToken!, ssecurity!, userId!));
   }
 
+  void _emitDebug(String msg) {
+    AppLogger.instance.d('XiaomiLogin', msg);
+    _controller.add(LoginEvent.debug(msg));
+  }
+
   void dispose() {
     _httpClient.close();
     unawaited(_controller.close());
@@ -497,22 +520,35 @@ class XiaomiLoginController {
 
 class LoginEvent {
   const LoginEvent.success(this.serviceToken, this.ssecurity, this.userId)
-      : errorMessage = null, phone = null, countdown = null;
+      : errorMessage = null,
+        phone = null,
+        countdown = null,
+        debugMessage = null;
   const LoginEvent.needCode(this.phone, this.countdown)
       : errorMessage = null,
         serviceToken = null,
         ssecurity = null,
-        userId = null;
+        userId = null,
+        debugMessage = null;
   const LoginEvent.loading([this.errorMessage])
       : serviceToken = null,
         ssecurity = null,
         userId = null,
         phone = null,
-        countdown = null;
+        countdown = null,
+        debugMessage = null;
   const LoginEvent.error(this.errorMessage)
       : serviceToken = null,
         ssecurity = null,
         userId = null,
+        phone = null,
+        countdown = null,
+        debugMessage = null;
+  const LoginEvent.debug(this.debugMessage)
+      : serviceToken = null,
+        ssecurity = null,
+        userId = null,
+        errorMessage = null,
         phone = null,
         countdown = null;
 
@@ -522,7 +558,9 @@ class LoginEvent {
   final String? errorMessage;
   final String? phone;
   final int? countdown;
+  final String? debugMessage;
 
   bool get isSuccess => serviceToken != null;
   bool get needCode => phone != null;
+  bool get isDebug => debugMessage != null;
 }
