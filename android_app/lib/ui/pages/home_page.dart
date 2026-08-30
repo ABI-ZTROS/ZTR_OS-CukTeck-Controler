@@ -25,6 +25,7 @@ import 'package:cuktech_controller/protocol/settings.dart';
 import 'package:cuktech_controller/ui/theme/coloros_animations.dart';
 
 import '../../main.dart';
+import '../../utils/logger/logger.dart';
 import '../widgets/charger_visual/charger_visual_widget.dart';
 import '../widgets/power_ring.dart';
 import '../widgets/port_radial_button.dart';
@@ -138,8 +139,8 @@ class _HomePageState extends State<HomePage>
     final cfg = await _tokenService.getSaved();
     if (cfg != null && cfg.isValid) {
       _startScan();
-    } else if (!mounted) {
-      // 跳转到 TokenImportPage
+    } else if (mounted) {
+      // 没有 Token → 跳转 TokenImportPage
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const TokenImportPage()),
       );
