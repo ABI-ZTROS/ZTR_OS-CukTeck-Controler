@@ -53,35 +53,37 @@ public partial class PowerRingControl : UserControl
 
     private void PowerRingControl_Loaded(object sender, RoutedEventArgs e)
     {
-        // 构建完整圆路径（背景环）
-        var bgPath = new Path { Stroke = Brushes.White, Opacity = 0.05, StrokeThickness = 10 };
+        // 背景环
+        var bgPath = new Path { Stroke = Brushes.White, Opacity = 0.08, StrokeThickness = 10 };
         _bgFigure.StartPoint = new Point(120, 20);
-        _bgArc.Point = new Point(120, 20); // 临时，Update 会设置
+        _bgArc.Point = new Point(120, 220);
         _bgArc.Size = new Size(100, 100);
         _bgArc.IsLargeArc = true;
         _bgArc.SweepDirection = SweepDirection.Clockwise;
         _bgFigure.Segments.Add(_bgArc);
-        // 第二个 arc 形成完整圆
-        var bgArc2 = new ArcSegment
+        _bgFigure.Segments.Add(new ArcSegment
         {
-            Point = new Point(120, 220),
+            Point = new Point(120, 20),
             Size = new Size(100, 100),
             IsLargeArc = true,
             SweepDirection = SweepDirection.Clockwise,
-        };
-        _bgFigure.Segments.Add(bgArc2);
-        var bgPathGeo = new PathGeometry(new[] { _bgFigure });
-        bgPath.Data = bgPathGeo;
-        (Content as Grid)?.Children.Insert(0, bgPath);
+        });
+        bgPath.Data = new PathGeometry(new[] { _bgFigure });
+        RingHost.Children.Insert(0, bgPath);
 
         // 进度环
-        var progPath = new Path { Stroke = (Brush)FindResource("AccentGreen"), StrokeThickness = 10, StrokeStartLineCap = PenLineCap.Round, StrokeEndLineCap = PenLineCap.Round };
+        var progPath = new Path
+        {
+            Stroke = (Brush)FindResource("ConnectedBrush"),
+            StrokeThickness = 10,
+            StrokeStartLineCap = PenLineCap.Round,
+            StrokeEndLineCap = PenLineCap.Round,
+        };
         _progressFigure.StartPoint = new Point(120, 20);
         _progressArc.Size = new Size(100, 100);
         _progressArc.SweepDirection = SweepDirection.Clockwise;
-        var progPathGeo = new PathGeometry(new[] { _progressFigure });
-        progPath.Data = progPathGeo;
-        (Content as Grid)?.Children.Insert(1, progPath);
+        progPath.Data = new PathGeometry(new[] { _progressFigure });
+        RingHost.Children.Insert(1, progPath);
 
         UpdateRing(TotalPower, MaxPower);
         UpdateText();
@@ -121,7 +123,7 @@ public partial class PowerRingControl : UserControl
         else if (power <= 180) ringColor = Color.FromRgb(0xF5, 0x9E, 0x0B); // 琥珀橙
         else ringColor = Color.FromRgb(0xEF, 0x44, 0x44);                  // 警示红
 
-        var progPath = ((Grid)Content).Children[1] as Path;
+        var progPath = RingHost.Children[1] as Path;
         if (progPath != null)
         {
             progPath.Stroke = new SolidColorBrush(ringColor);

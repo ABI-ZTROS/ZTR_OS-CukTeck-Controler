@@ -4,11 +4,9 @@
              x:Name="Root"
              MinWidth="240" MinHeight="240">
 
-    <Grid>
-        <!-- 背景环 -->
-        <ArcSegment x:Name="BgArc"/>
-        <!-- 进度环 -->
-        <ArcSegment x:Name="ProgressArc"/>
+    <Grid x:Name="RingHost">
+        <!-- Paths are added dynamically in code-behind -->
+
         <!-- 中心文字 -->
         <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
             <TextBlock x:Name="PowerText"
