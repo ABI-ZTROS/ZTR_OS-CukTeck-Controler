@@ -114,7 +114,7 @@ class _WebviewLoginPageState extends State<WebviewLoginPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              const Icon(Icons.cloud_login, size: 64, color: Colors.blue),
+              const Icon(Icons.cloud, size: 64, color: Colors.blue),
               const SizedBox(height: 16),
               const Text(
                 '登录你的米家账号',
