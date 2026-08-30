@@ -25,6 +25,7 @@ import 'package:cuktech_controller/protocol/token_service.dart';
 import 'package:cuktech_controller/protocol/settings.dart';
 import 'package:cuktech_controller/ui/theme/coloros_animations.dart';
 
+import '../../main.dart';
 import '../widgets/charger_visual/charger_visual_widget.dart';
 import '../widgets/power_ring.dart';
 import '../widgets/port_radial_button.dart';
@@ -42,7 +43,8 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin {
+class _HomePageState extends State<HomePage>
+    with SingleTickerProviderStateMixin, RouteAware {
   final AndroidScanner _scanner = AndroidScanner.instance;
   final AndroidConnector _connector = AndroidConnector.instance;
   final TokenService _tokenService = TokenService.instance;
@@ -85,7 +87,23 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
   void dispose() {
     _entranceController.dispose();
     for (final s in _subs) s.cancel();
+    routeObserver.unsubscribe(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  /// 从 TokenImportPage 等子页面 pop 回来时触发 → 重新扫描连接
+  @override
+  Future<void> didPopNext() async {
+    AppLogger.instance.i('HomePage', 'didPopNext → re-check token + scan');
+    if (!_isConnected && !_isScanning && !_isConnecting) {
+      await _checkSavedToken();
+    }
   }
 
   void _setupEntranceAnimation() {
@@ -156,27 +174,45 @@ class _HomePageState extends State<HomePage> with SingleTickerProviderStateMixin
     setState(() {
       _isConnecting = true;
       _currentStep = 0;
+      _errorMessage = null;
     });
     try {
-      final ok = await _connector.connect(result.device);
-      for (var i = 0; i < _authSteps.length; i++) {
-        setState(() => _currentStep = i);
-        await Future.delayed(const Duration(milliseconds: 300));
+      // Step 0: BLE 物理连接
+      setState(() => _currentStep = 0);
+      final bleOk = await _connector.connect(result.device);
+      if (!bleOk) throw Exception('BLE 物理连接失败');
+
+      // Step 1-4: MiOT 认证（真调 Authenticator，不是假动画）
+      final cfg = await _tokenService.getSaved();
+      if (cfg == null || !cfg.isValid) {
+        throw Exception('Token 未配置，请先导入 Token');
       }
-      if (!ok) throw Exception("BLE 连接失败");
-      // Authenticator 会在 connect 内部完成认证
-      await Future.delayed(const Duration(milliseconds: 200));
+
+      // Authenticator 内部按 5 步走: init → key exchange → random key → HMAC → result
+      final authOk = await Authenticator.instance.authenticate(_connector, cfg.token);
+      if (!authOk) throw Exception('MiOT 认证失败（Token 不正确？）');
+
+      setState(() => _currentStep = -1);
       setState(() {
         _isConnecting = false;
         _isConnected = true;
-        _currentStep = -1;
       });
+
+      // 认证成功后，连接端口数据流（开始接收实时电压/电流/功率）
       await wirePortDecoder(_connector);
-    } catch (e) {
+      AppLogger.instance.i('HomePage', 'Connected + Authenticated → port decoder wired');
+    } catch (e, stackTrace) {
+      AppLogger.instance.e('HomePage', 'Connect failed: $e', stackTrace);
       setState(() {
         _isConnecting = false;
+        _isConnected = false;
+        _currentStep = -1;
         _errorMessage = '连接失败: $e';
       });
+      // 尝试断开 BLE，避免残留连接
+      try {
+        await _connector.disconnect();
+      } catch (_) {}
     }
   }
 

@@ -6,6 +6,9 @@ import 'ui/pages/home_page.dart';
 import 'ui/theme/app_theme.dart';
 import 'utils/logger/logger.dart';
 
+/// 全局路由观察者 — 让 HomePage 在 TokenImportPage pop 回来时自动重扫
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -32,6 +35,7 @@ class CukTechControllerApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark(),
       home: const HomePage(),
+      navigatorObservers: <NavigatorObserver>[routeObserver],
     );
   }
 }// trigger rebuild
