@@ -33,29 +33,31 @@ jobs:
           if [ -d android-app-custom/manifest/res ]; then
             cp -r android-app-custom/manifest/res/* android/app/src/main/res/
           fi
-      - name: Disable checkReleaseAarMetadata task (share_plus compat)
+      - name: Disable checkReleaseAarMetadata ALL subprojects
         working-directory: android_app
         run: |
-          # AGP 8's checkReleaseAarMetadata rejects share_plus built for android-33
-          # while flutter_blue_plus requires compileSdk 36. Disable the task by name.
+          # Disable the task globally in root build.gradle.kts
+          # share_plus compiled for android-33, flutter_blue_plus needs compileSdk 36
           python3 - << 'PYPATCH'
           import pathlib
-          p = pathlib.Path('android/app/build.gradle.kts')
+          p = pathlib.Path('android/build.gradle.kts')
           t = p.read_text()
+          # subprojects block disables in ALL subprojects (share_plus, flutter_blue_plus, etc.)
           inject = """
           // === Patch: disable AGP 8 checkReleaseAarMetadata (share_plus built for android-33) ===
-          tasks.matching { it.name.contains("AarMetadata") }.configureEach {
-              enabled = false
+          subprojects {
+              tasks.matching { it.name.contains("AarMetadata") }.configureEach {
+                  enabled = false
+              }
           }
           """
           if 'AarMetadata' not in t:
-              # Insert at end of file (outside android {} block — Gradle tasks are top-level)
               p.write_text(t + inject)
-              print('Patched: added tasks.matching disable')
+              print('Patched root build.gradle.kts')
           else:
               print('Already patched')
-          print('=== build.gradle.kts tail ===')
-          print('\n'.join(p.read_text().splitlines()[-15:]))
+          print('=== root build.gradle.kts tail ===')
+          print('\n'.join(p.read_text().splitlines()[-10:]))
           PYPATCH
       - name: Patch flutter_inappwebview proguard
         run: |
