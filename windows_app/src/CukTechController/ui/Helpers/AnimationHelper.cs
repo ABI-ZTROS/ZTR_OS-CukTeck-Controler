@@ -20,6 +20,7 @@ public static class AnimationHelper
 
     /// <summary>
     /// 页面淡入 + 从下方滑入（ColorOS 标准入场）
+    /// Window 不能应用 TranslateTransform —— 自动作用在 Window.Content 上
     /// </summary>
     /// <param name="slideDistance">滑动距离(px)，默认 20</param>
     public static void PlayPageEntrance(
@@ -27,9 +28,17 @@ public static class AnimationHelper
         int durationMs = 350,
         double slideDistance = 20)
     {
+        // Window 的 CoerceRenderTransform 禁止 TranslateTransform，
+        // 必须动画化 Window.Content（内部容器），不是 Window 自身
+        UIElement target = page;
+        if (page is System.Windows.Window w)
+        {
+            target = w.Content as UIElement ?? page;
+        }
+
         page.Dispatcher.BeginInvoke(DispatcherPriority.Background, () =>
         {
-            FadeAndSlideIn(page, durationMs, slideDistance);
+            FadeAndSlideIn(target, durationMs, slideDistance);
         });
     }
 
