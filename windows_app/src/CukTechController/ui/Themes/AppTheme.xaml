@@ -22,14 +22,27 @@
     <Color x:Key="TextDisabled">#FF6B7280</Color>
 
     <!-- ===== Brush ===== -->
+    <!-- 背景 -->
     <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BgBackgroundColor}"/>
     <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}"/>
     <SolidColorBrush x:Key="CardBrush" Color="{StaticResource CardColor}"/>
+
+    <!-- 功能色 — 完整套（Color→Brush，方便 C# 代码直接 FindResource）-->
     <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentBlue}"/>
+    <SolidColorBrush x:Key="AccentBlueBrush" Color="{StaticResource AccentBlue}"/>
+    <SolidColorBrush x:Key="AccentBlueDarkBrush" Color="{StaticResource AccentBlueDark}"/>
+    <SolidColorBrush x:Key="AccentGreenBrush" Color="{StaticResource AccentGreen}"/>
     <SolidColorBrush x:Key="ConnectedBrush" Color="{StaticResource AccentGreen}"/>
+    <SolidColorBrush x:Key="AccentOrangeBrush" Color="{StaticResource AccentOrange}"/>
     <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource AccentOrange}"/>
+    <SolidColorBrush x:Key="AccentRedBrush" Color="{StaticResource AccentRed}"/>
     <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource AccentRed}"/>
+    <SolidColorBrush x:Key="AccentPurpleBrush" Color="{StaticResource AccentPurple}"/>
+
+    <!-- 状态 -->
     <SolidColorBrush x:Key="DisconnectedBrush" Color="#FF6B7280"/>
+
+    <!-- 文字 -->
     <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimary}"/>
     <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondary}"/>
     <SolidColorBrush x:Key="TextDisabledBrush" Color="{StaticResource TextDisabled}"/>
