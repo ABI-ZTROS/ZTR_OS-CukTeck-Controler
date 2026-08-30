@@ -21,6 +21,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        DataContext = new MainViewModel();
         _vm = (MainViewModel)DataContext;
 
         // ═══ Show 后应用 ColorOS VisualPack + 入场动画 ═══

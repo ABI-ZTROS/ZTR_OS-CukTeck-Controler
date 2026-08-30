@@ -53,6 +53,8 @@ public partial class App : Application
             var services = new ServiceCollection();
             services.AddSingleton<WindowEffectsService>(_ => _windowEffects);
             Services = services.BuildServiceProvider();
+            AppLogger.Instance.Configure(logDir);
+            Log.Information("[BOOT] AppLogger configured");
             Log.Information("[BOOT] DI ready");
 
             // ─── 3. 加载设置 ───

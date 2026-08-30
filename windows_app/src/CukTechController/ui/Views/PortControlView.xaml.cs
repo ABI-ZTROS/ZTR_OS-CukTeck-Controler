@@ -1,18 +1,16 @@
 using System.Windows;
 using CukTechController.ViewModels;
-using CukTechController.Utils;
 
 namespace CukTechController.Views
 {
-    /// <summary>
-    /// PortControlView 的交互逻辑
-    /// </summary>
     public partial class PortControlView : Window
     {
-        public PortControlView()
+        public PortControlView() : this(1) { }
+
+        public PortControlView(int piid)
         {
             InitializeComponent();
-            AppLogger.Debug("PortControlView initialized");
+            DataContext = new PortControlViewModel(piid);
         }
     }
 }

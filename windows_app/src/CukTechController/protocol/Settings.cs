@@ -83,7 +83,7 @@ namespace CukTechController.Protocol
             {
                 if (File.Exists(_settingsPath))
                 {
-                    var json = await File.ReadAllTextAsync(_settingsPath);
+                    var json = await File.ReadAllTextAsync(_settingsPath).ConfigureAwait(false);
                     var settings = JsonSerializer.Deserialize<Settings>(json);
                     if (settings != null)
                     {

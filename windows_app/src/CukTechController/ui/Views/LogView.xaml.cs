@@ -67,18 +67,17 @@ namespace CukTechController.Views
                     return;
                 }
 
-                var logPath = Path.Combine(logDir, "cuktech.log");
-                if (!File.Exists(logPath))
+                // 读取所有 Serilog 滚动日志文件
+                var sb = new StringBuilder();
+                var files = Directory.GetFiles(logDir, "cuktech*.log")
+                    .OrderBy(f => f.EndsWith(".log") ? 0 : int.TryParse(Path.GetExtension(f).TrimStart('.'), out var n) ? n : 999);
+
+                if (files.Length == 0)
                 {
                     LogTextBox.Text = "暂无日志文件";
                     StatusTextBlock.Text = "就绪";
                     return;
                 }
-
-                // 读取主日志文件 + 所有滚动文件，按时间顺序合并
-                var sb = new StringBuilder();
-                var files = Directory.GetFiles(logDir, "cuktech.log*")
-                    .OrderBy(f => f.EndsWith(".log") ? 0 : int.TryParse(Path.GetExtension(f).TrimStart('.'), out var n) ? n : 999);
 
                 foreach (var file in files)
                 {
