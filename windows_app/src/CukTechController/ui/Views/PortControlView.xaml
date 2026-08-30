@@ -22,7 +22,7 @@
                    Margin="0,0,0,16"/>
 
         <!-- 端口开关 -->
-        <Border Grid.Row="1" Style="{StaticResource CardStyle}">
+        <Border Grid.Row="1" Style="{StaticResource PortCardStyle}">
             <StackPanel>
                 <TextBlock Text="电源控制" FontWeight="Bold"
                            Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -36,13 +36,13 @@
                                VerticalAlignment="Center"/>
                     <Button Grid.Column="1" Content="切换"
                             Command="{Binding TogglePortCommand}"
-                            Style="{StaticResource PrimaryButton}"/>
+                            Style="{StaticResource ColorOSButton}"/>
                 </Grid>
             </StackPanel>
         </Border>
 
         <!-- 倒计时 -->
-        <Border Grid.Row="2" Style="{StaticResource CardStyle}">
+        <Border Grid.Row="2" Style="{StaticResource PortCardStyle}">
             <StackPanel>
                 <TextBlock Text="倒计时 (分钟)" FontWeight="Bold"
                            Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -54,14 +54,14 @@
                              BorderBrush="{StaticResource DisconnectedBrush}"/>
                     <Button Content="保存"
                             Command="{Binding SaveCountdownCommand}"
-                            Style="{StaticResource PrimaryButton}"
+                            Style="{StaticResource ColorOSButton}"
                             Margin="8,0,0,0"/>
                 </StackPanel>
             </StackPanel>
         </Border>
 
         <!-- 协议设置 -->
-        <Border Grid.Row="3" Style="{StaticResource CardStyle}">
+        <Border Grid.Row="3" Style="{StaticResource PortCardStyle}">
             <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel>
                     <TextBlock Text="协议设置" FontWeight="Bold"

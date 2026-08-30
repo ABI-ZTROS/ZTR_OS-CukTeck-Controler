@@ -14,7 +14,7 @@
                        Margin="0,0,0,16"/>
 
             <!-- PIID 5: 场景模式 -->
-            <Border Style="{StaticResource CardStyle}">
+            <Border Style="{StaticResource PortCardStyle}">
                 <StackPanel>
                     <TextBlock Text="场景模式 (PIID 5)" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -27,7 +27,7 @@
             </Border>
 
             <!-- PIID 6: 息屏时间 -->
-            <Border Style="{StaticResource CardStyle}">
+            <Border Style="{StaticResource PortCardStyle}">
                 <StackPanel>
                     <TextBlock Text="息屏时间 (PIID 6)" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -40,7 +40,7 @@
             </Border>
 
             <!-- PIID 13: 语言 -->
-            <Border Style="{StaticResource CardStyle}">
+            <Border Style="{StaticResource PortCardStyle}">
                 <StackPanel>
                     <TextBlock Text="语言 (PIID 13)" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -53,7 +53,7 @@
             </Border>
 
             <!-- PIID 15/19/20: 开关项 -->
-            <Border Style="{StaticResource CardStyle}">
+            <Border Style="{StaticResource PortCardStyle}">
                 <StackPanel>
                     <TextBlock Text="开关设置" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -73,7 +73,7 @@
             </Border>
 
             <!-- PIID 8: 总倒计时 -->
-            <Border Style="{StaticResource CardStyle}">
+            <Border Style="{StaticResource PortCardStyle}">
                 <StackPanel>
                     <TextBlock Text="总倒计时 (分钟)" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
@@ -100,7 +100,7 @@
             <!-- 保存按钮 -->
             <Button Content="保存设置"
                     Command="{Binding SaveCommand}"
-                    Style="{StaticResource PrimaryButton}"
+                    Style="{StaticResource ColorOSButton}"
                     Margin="0,16,0,0"
                     IsEnabled="{Binding IsLoading, Converter={StaticResource InvertBoolConv}}"/>
         </StackPanel>
