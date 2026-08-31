@@ -402,14 +402,28 @@ class XiaomiLoginController {
       final d9 = _parseXiaomiJson(r9.body);
       final sign = d9['_sign'] as String;
       final nonce = d9['nonce'] as String? ?? '';
-      _emitDebug('  ↳ ${r9.statusCode} sign len=${sign.length}');
+      _emitDebug('  ↳ ${r9.statusCode} sign len=${sign.length} nonce=$nonce');
       _emitDebug('  ↳ has ssecurity=${d9.containsKey('ssecurity')} has psecurity=${d9.containsKey('psecurity')}');
       _emitDebug('  ↳ ALL keys: [${d9.keys.join(",")}]');
+      _emitDebug('  ↳ FULL BODY: ${r9.body}'); // ⚠️ 完整输出！
+
+      // ⚠️ 关键优化：如果 Step 9 直接返回了 ssecurity，跳过 Step 10！
+      if (d9.containsKey('ssecurity')) {
+        _emitDebug('  🎉 Step 9 ALREADY HAS ssecurity! Skipping Step 10.');
+        await _completeLogin(
+          d9['ssecurity'] as String,
+          d9['location'] as String? ?? '',
+          d9['userId']?.toString() ?? '',
+          nonce,
+        );
+        _context = null;
+        return;
+      }
 
       // Step 10 — THE CRITICAL ONE
       _controller.add(LoginEvent.loading('正在完成登录...'));
       _emitDebug('═══════ Step 10: serviceLoginAuth2 (FINAL!) ═══════');
-      _emitDebug('POST /pass/serviceLoginAuth2 with fresh sign');
+      _emitDebug('POST /pass/serviceLoginAuth2 hash=${_passwordHash.substring(0, 8)}...');
       final r10 = await _post(
         'https://account.xiaomi.com/pass/serviceLoginAuth2',
         params: {
@@ -427,6 +441,7 @@ class XiaomiLoginController {
       _emitDebug('  ↳ ${r10.statusCode} code=${d10['code']} secStatus=${d10['securityStatus']}');
       _emitDebug('  ↳ has ssecurity=${d10.containsKey('ssecurity')} has psecurity=${d10.containsKey('psecurity')}');
       _emitDebug('  ↳ ALL keys: [${d10.keys.join(",")}]');
+      _emitDebug('  ↳ FULL BODY: ${r10.body}'); // ⚠️ 完整输出！
 
       if (d10.containsKey('ssecurity')) {
         _emitDebug('  ✅ GOT SSECURITY! Proceeding...');
@@ -438,10 +453,17 @@ class XiaomiLoginController {
         );
       } else {
         _emitDebug('❌ Step 10 NO SSECURITY! This is the bug.');
-        _emitDebug('   Full response: ${_truncate(r10.body, 500)}');
+        _emitDebug('   Full body above ↑');
         _emitDebug('   Session cookies: [${_sessionCookies.keys.join(",")}]');
-        _emitDebug('   identity_session present? ${_sessionCookies.containsKey('identity_session')}');
-        _emitDebug('   passToken present? ${_sessionCookies.containsKey('passToken')}');
+        _emitDebug('   identity_session present? ${_sessionCookies.containsKey('identity_session')} len=${_sessionCookies['identity_session']?.length ?? 0}');
+        _emitDebug('   passToken present? ${_sessionCookies.containsKey('passToken')} len=${_sessionCookies['passToken']?.length ?? 0}');
+        _emitDebug('   serviceToken present? ${_sessionCookies.containsKey('serviceToken')} len=${_sessionCookies['serviceToken']?.length ?? 0}');
+        // 打印每个 cookie 的存在情况（不含敏感值）
+        _emitDebug('   ALL cookie check:');
+        for (final key in _sessionCookies.keys) {
+          final val = _sessionCookies[key] ?? '';
+          _emitDebug('     $key = ${val.length} bytes');
+        }
         _controller.add(LoginEvent.error('无法获取登录凭据（Step 10 失败）。请查看调试日志'));
       }
       _context = null;
