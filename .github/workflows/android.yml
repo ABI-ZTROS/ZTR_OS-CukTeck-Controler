@@ -157,8 +157,19 @@ jobs:
           : "${EXPECTED_SHA256:?缺少 EXPECTED_SHA256（preflight 没跑成功？）}"
 
           NORMALIZE_FP() {
-              # 转大写，去空格
-              echo "$1" | tr '[:lower:]' '[:upper:]' | tr -d '[:space:]'
+              # 把 SHA-256 指纹统一归一成「大写 + 冒号分隔 32 对」标准格式，兼容 3 种输入：
+              #   (a) 冒号分隔：DE:54:64:FA:75:17:... （32 对）
+              #   (b) 破折号分隔：DE-54-64-FA-75-17:...
+              #   (c) 连续 64 hex：de5464fa7517b241... （apksigner build-tools 34/37 新格式）
+              local raw flat
+              raw="$(echo "$1" | tr -d '[:space:]')"
+              flat="$(echo "$raw" | tr -d ':-')"
+              if [[ "$flat" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+                  # 64 位连续 hex → 每 2 位插冒号，再转大写
+                  echo "$flat" | tr '[:lower:]' '[:upper:]' | sed -E 's/(..)/\1:/g;s/:$//'
+              else
+                  echo "$raw" | tr '[:lower:]' '[:upper:]'
+              fi
           }
           EXP="$(NORMALIZE_FP "$EXPECTED_SHA256")"
           echo "🔍 期望 SHA-256：$EXP"
@@ -203,9 +214,6 @@ jobs:
                 #     Signer #1 certificate SHA-256 digest: AA:BB:CC:...
                 #     Signer #1 certificate SHA256 digest: AA:BB:CC:...
                 #     Signer #1 Cert SHA-256: AA:BB:CC:...
-                # 注意：外面是 set -euo pipefail，绝对不能出现「producer | head -1」
-                # 否则 head 读完就关读端，producer 被 SIGPIPE 杀掉，退出码 141 触发 pipefail→errexit。
-                # awk 内部已自带「找到即 print + exit」，最多输出一行，不允许再管道接 head。
                 APK_SHA="$(
                   awk '{
                     line=tolower($0)
@@ -213,6 +221,18 @@ jobs:
                     if (idx==0) next
                     rest=substr(line, idx)
                     n=split(rest, arr, /[:[:space:]]+/)
+                    # 格式 1 (新版)：某个 token 本身就是 64 位连续 hex
+                    #   例：certificate SHA-256 digest: de5464fa7517b24105ea682f7ec3c5c86ad506448a19d090fab6040666373438
+                    for (s=1;s<=n;s++) {
+                      tok=arr[s]
+                      if (tok ~ /^[0-9a-f]{64}$/) {
+                        out=""
+                        for (i=1;i<=64;i+=2) out = out (out=="" ? "" : ":") substr(tok,i,2)
+                        print out
+                        exit
+                      }
+                    }
+                    # 格式 2 (旧版)：32 个独立的 2-hex-byte token，被冒号/空格分开
                     for (s=1;s<=n;s++) {
                       cand=""
                       for (e=s;e<=s+31 && e<=n;e++) {
@@ -225,8 +245,8 @@ jobs:
                   }' "$SIG_OUT"
                 )"
                 if [ -z "$APK_SHA" ]; then
-                  # grep -m1：匹配到 1 行就停止，等价于 grep | head -1 但无管道无 SIGPIPE 风险
-                  APK_SHA="$(grep -m1 -oE "[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){30,}" "$SIG_OUT" || true)"
+                  # grep -m1：匹配 64 位连续 hex 或 冒号分隔 32 对，任意一种即可（无管道避免 SIGPIPE）
+                  APK_SHA="$(grep -m1 -oE "[0-9A-Fa-f]{64}|[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){30,}" "$SIG_OUT" || true)"
                 fi
                 SIGNER_NAME="$(grep -Ei "Signer #[0-9]+|certificate|subject|Owner|Issuer|DN:" "$SIG_OUT" | head -8 || true)"
                 APK_SIGNER_INFO="${SIGNER_NAME}"
@@ -258,9 +278,10 @@ jobs:
                   if [ "$RC" -eq 0 ] && [ -n "$KT_OUT" ]; then
                     echo "   [method 2a] keytool -printcert Subject line:"
                     echo "$KT_OUT" | grep -E "^(Owner|Issuer|SHA-?256):" | head -5 || true
-                    # grep -m1：内置「第一匹配即停」，避免 grep | head 管道 SIGPIPE 在 pipefail 下炸
+                    # 兼容 2 种 value 格式：冒号分隔 32 对（95+ chars）或连续 64 hex
+                    # grep -m1：第一匹配即停，管道无 head，避免 SIGPIPE
                     APK_SHA="$(echo "$KT_OUT" \
-                              | grep -m1 -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                              | grep -m1 -oEi "SHA-?256:[[:space:]]*([0-9A-Fa-f]{64}|[0-9A-Fa-f:]{95,})" \
                               | sed -E 's/^SHA-?256:[[:space:]]*//I' || true)"
                     APK_SIGNER_INFO="$(echo "$KT_OUT" | grep -E "^(Owner|Issuer):" | head -2 || true)"
                   fi
@@ -290,7 +311,7 @@ jobs:
                     set -e
                     if [ "$RC" -eq 0 ] && [ -n "$KT2_OUT" ]; then
                       APK_SHA="$(echo "$KT2_OUT" \
-                                | grep -m1 -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                                | grep -m1 -oEi "SHA-?256:[[:space:]]*([0-9A-Fa-f]{64}|[0-9A-Fa-f:]{95,})" \
                                 | sed -E 's/^SHA-?256:[[:space:]]*//I' || true)"
                       APK_SIGNER_INFO="$(echo "$KT2_OUT" | grep -E "^(Owner|Issuer):" | head -2 || true)"
                     fi
@@ -309,7 +330,7 @@ jobs:
               set -e
               if [ "$RC" -eq 0 ] || [ -n "$JS_OUT" ]; then
                 APK_SHA="$(echo "$JS_OUT" \
-                          | grep -m1 -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                          | grep -m1 -oEi "SHA-?256:[[:space:]]*([0-9A-Fa-f]{64}|[0-9A-Fa-f:]{95,})" \
                           | sed -E 's/^SHA-?256:[[:space:]]*//I' || true)"
                 APK_SIGNER_INFO="jarsigner signer=$(echo "$JS_OUT" | grep -m1 -oE "CN=[^,]+" || true)"
               fi
