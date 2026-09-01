@@ -22,6 +22,8 @@ import 'package:cuktech_controller/protocol/constants.dart';
 import 'package:cuktech_controller/protocol/port_control.dart';
 import 'package:cuktech_controller/protocol/token_service.dart';
 import 'package:cuktech_controller/protocol/settings.dart';
+import 'package:cuktech_controller/protocol/secure_token_store.dart';
+import 'package:cuktech_controller/utils/xiaomi_cloud/cloud_client.dart';
 import 'package:cuktech_controller/ui/theme/coloros_animations.dart';
 
 import '../../main.dart';
@@ -136,14 +138,101 @@ class _HomePageState extends State<HomePage>
   }
 
   Future<void> _checkSavedToken() async {
+    final store = SecureTokenStore.instance;
+
+    // 1️⃣ 先恢复云凭证 → 让 XiaomiCloudClient 可调用 API
+    final cloudCred = await store.readCloud();
+    if (cloudCred != null && cloudCred.isValid) {
+      XiaomiCloudClient.instance.setCredentials(
+        serviceToken: cloudCred.serviceToken,
+        ssecurity: cloudCred.ssecurity,
+        userId: cloudCred.userId,
+      );
+      AppLogger.instance.i('HomePage',
+          '✅ Cloud creds restored: user=${cloudCred.userId}, did=${cloudCred.did}');
+    }
+
+    // 2️⃣ 有 BLE token (beaconKey) 就直接扫描连接
     final cfg = await _tokenService.getSaved();
     if (cfg != null && cfg.isValid) {
       _startScan();
-    } else if (mounted) {
-      // 没有 Token → 跳转 TokenImportPage
+      return;
+    }
+
+    // 3️⃣ 没 BLE token 但有云凭证 → 先放着，等用户刷新设备列表
+    if (cloudCred != null && cloudCred.isValid) {
+      AppLogger.instance.i('HomePage',
+          '☁️ Has cloud creds but no device selected yet');
+      setState(() => _errorMessage = '已登录米家，下拉刷新获取设备列表');
+      return;
+    }
+
+    // 4️⃣ 啥都没有 → 跳 TokenImportPage
+    if (mounted) {
       Navigator.of(context).pushReplacement(
         MaterialPageRoute(builder: (_) => const TokenImportPage()),
       );
+    }
+  }
+
+  Future<void> _refreshDeviceFromCloud() async {
+    final client = XiaomiCloudClient.instance;
+    final store = SecureTokenStore.instance;
+
+    AppLogger.instance.i('HomePage', '☁️ Refreshing device from cloud...');
+    setState(() => _errorMessage = '正在从云端获取设备列表...');
+
+    try {
+      final devices = await client.getDeviceList();
+      AppLogger.instance.i('HomePage', '☁️ Got ${devices.length} devices');
+
+      if (devices.isEmpty) {
+        setState(() => _errorMessage = '云端没有设备，请在米家 App 添加后重试');
+        return;
+      }
+
+      // 自动选第一个 CUKTECH 设备（或任何带 beaconToken 的）
+      for (final dev in devices) {
+        if (dev.beaconToken.isEmpty) continue;
+
+        final beaconKey = await client.getBeaconKey(dev.did);
+        final effectiveToken = beaconKey ?? dev.beaconToken;
+        if (effectiveToken.isEmpty) continue;
+
+        // 保存 TokenConfig 给 BLE 用
+        final cfg = TokenConfig(
+          token: effectiveToken,
+          key: beaconKey ?? '',
+          did: dev.did,
+          userId: client.userId,
+          deviceMac: dev.mac,
+          deviceName: dev.name,
+          deviceModel: dev.model,
+        );
+        await _tokenService.selectAndSave(cfg);
+
+        // 同时更新云凭证里的 did/beaconKey
+        final existing = await store.readCloud();
+        if (existing != null) {
+          await store.writeCloud(existing.copyWith(
+            did: dev.did,
+            beaconKey: beaconKey ?? '',
+            deviceName: dev.name,
+            deviceModel: dev.model,
+          ));
+        }
+
+        AppLogger.instance.i('HomePage',
+            '✅ Device saved: ${dev.name} (${dev.model})');
+        setState(() => _errorMessage = null);
+        await _startScan();
+        return;
+      }
+
+      setState(() => _errorMessage = '找到 ${devices.length} 台设备但都没有 BLE Token');
+    } catch (e, stackTrace) {
+      AppLogger.instance.e('HomePage', 'Cloud refresh failed: $e', stackTrace);
+      setState(() => _errorMessage = '云端刷新失败: $e');
     }
   }
 
@@ -292,7 +381,14 @@ class _HomePageState extends State<HomePage>
             return FadeTransition(
               opacity: _fadeAnim,
               child: RefreshIndicator(
-                onRefresh: () async => _startScan(),
+                onRefresh: () async {
+                  // 智能刷新：有云凭证 → 从云端刷设备，否则 BLE 扫描
+                  if (XiaomiCloudClient.instance.isLoggedIn) {
+                    await _refreshDeviceFromCloud();
+                  } else {
+                    await _startScan();
+                  }
+                },
                 backgroundColor: const Color(0xFF3B82F6),
                 color: Colors.white,
                 child: CustomScrollView(

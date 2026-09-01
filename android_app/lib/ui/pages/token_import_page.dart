@@ -224,25 +224,21 @@ class _TokenImportPageState extends State<TokenImportPage> {
                           XiaomiCloudClient.instance.setCredentials(
                             serviceToken: serviceToken,
                             ssecurity: ssecurity,
+                            userId: userId,
                           );
-                          // 🚀 立即持久化（保险：防止选设备前杀后台）
+                          // 🚀 立即持久化
                           await _store.writeCloud(CloudCredentials(
                             userId: userId,
                             ssecurity: ssecurity,
                             serviceToken: serviceToken,
                           ));
-                          // 导航到设备列表选择
-                          final devices =
-                              await XiaomiCloudClient.instance.getDeviceList();
-                          if (mounted && devices.isNotEmpty) {
-                            // 显示设备选择对话框
-                            _showDeviceSelectDialog(devices);
-                          } else if (mounted) {
+                          // 直接回首页 — 首页有刷新按钮/下拉刷新来拿设备列表
+                          if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
-                                  content:
-                                      Text('未找到设备，请确认账号是否已绑定设备')),
+                                  content: Text('✅ 登录成功！回到首页下拉刷新设备')),
                             );
+                            Navigator.of(context).pop();
                           }
                         },
                       ),
