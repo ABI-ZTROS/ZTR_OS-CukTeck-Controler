@@ -46,7 +46,7 @@ jobs:
           cat > android_app/android/key.properties << 'EOF'
           storePassword=cuktech123
           keyPassword=cuktech123
-          keyAlias=cuktech
+          keyAlias=dev.cloud.ztr_os
           storeFile=upload-keystore.jks
           EOF
           cat android_app/android/key.properties
