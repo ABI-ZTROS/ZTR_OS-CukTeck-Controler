@@ -90,6 +90,7 @@ class XiaomiCloudClient {
     final cookies = <String, String>{
       'userId': _userId,
       'serviceToken': _serviceToken,
+      'yetAnotherServiceToken': _serviceToken, // 🔑 Python second class includes this!
       'locale': 'en_GB',
       'timezone': 'GMT+08:00',
       'channel': 'MI_APP_STORE',
@@ -97,14 +98,19 @@ class XiaomiCloudClient {
 
     for (int retry = 0; retry < 3; retry++) {
       try {
-        final request = http.Request('POST', Uri.parse(url))
+        // 🔑 Python puts encParams in URL query, NOT body! (params=fields)
+        final queryString = encParams.entries
+            .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
+            .join('&');
+        final fullUrl = '$url?$queryString';
+        final request = http.Request('POST', Uri.parse(fullUrl))
           ..headers.addAll(headers)
           ..headers['Cookie'] = cookies.entries
               .map((e) => '${e.key}=${e.value}')
-              .join('; ')
-          ..body = encParams.entries
-              .map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}')
-              .join('&');
+              .join('; ');
+
+        AppLogger.instance.i('XiaomiCloudClient',
+            'POST ${url.split("com")[1]}?... encParams keys=[${encParams.keys.join(",")}]');
 
         final response = await _httpClient.send(request).timeout(
               const Duration(seconds: 5),
@@ -112,10 +118,14 @@ class XiaomiCloudClient {
 
         if (response.statusCode == 200) {
           final responseBody = await response.stream.bytesToString();
+          AppLogger.instance.i('XiaomiCloudClient',
+              'API raw resp: ${responseBody.substring(0, responseBody.length > 200 ? 200 : responseBody.length)}');
           final decrypted = decryptRc4(
             signedNonce(_ssecurity, encParams['_nonce']!),
             responseBody,
           );
+          AppLogger.instance.i('XiaomiCloudClient',
+              'API decrypted: ${decrypted.substring(0, decrypted.length > 300 ? 300 : decrypted.length)}');
           return jsonDecode(decrypted) as Map<String, dynamic>;
         } else {
           AppLogger.instance.w(
