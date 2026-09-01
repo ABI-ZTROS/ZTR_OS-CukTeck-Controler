@@ -169,49 +169,147 @@ jobs:
             APK_COUNT=$((APK_COUNT+1))
             echo
             echo "=== 校验 APK：$apk ==="
+            ls -la "$apk"
+            echo "   META-INF 清单（判断是否有 v1 jar 签名）:"
+            set +e
+            unzip -l "$apk" | grep -E "META-INF/.*\.(RSA|EC|DSA|SF)" | head -20
+            set -e
             APK_SHA=""
+            APK_SIGNER_INFO=""
 
-            # 方法 A：优先用 apksigner（需要 Android SDK build-tools），对 v2/v3 scheme 最准
-            if command -v apksigner >/dev/null 2>&1; then
-              set +e
-              CERT_DER="$(mktemp -u).rsa.pkcs8.der"
-              apksigner verify --print-certs --verbose "$apk" > /tmp/apksig_$$.txt 2>&1
-              RC=$?
-              set -e
-              if [ $RC -eq 0 ]; then
-                  APK_SHA="$(grep -oE "SHA-256[[:space:]]*digest:[[:space:]]*[0-9a-fA-F:]{95,}" /tmp/apksig_$$.txt \
-                            | head -1 | sed -E 's/SHA-256[[:space:]]+digest:[[:space:]]*//')"
-                  echo "   apksigner SHA-256：$APK_SHA"
-              else
-                  echo "   ⚠️  apksigner 返回非 0，改用 keytool -printcert 兜底（见下）"
-                  cat /tmp/apksig_$$.txt | head -20 || true
+            # 方法 1：apksigner verify —— 最权威，覆盖 v1/v2/v3/v4 签名方案
+            if [ -z "$APK_SHA" ]; then
+              APKSIGNER_BIN=""
+              if command -v apksigner >/dev/null 2>&1; then
+                APKSIGNER_BIN=apksigner
+              elif [ -n "${ANDROID_SDK_ROOT:-}" ] || [ -n "${ANDROID_HOME:-}" ]; then
+                SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+                # build-tools 里通常都有 apksigner
+                CANDIDATE="$(find "$SDK_ROOT/build-tools" -maxdepth 2 -name apksigner -type f 2>/dev/null | sort -V | tail -1)"
+                if [ -n "$CANDIDATE" ]; then APKSIGNER_BIN="$CANDIDATE"; fi
               fi
-              rm -f /tmp/apksig_$$.txt
+              echo "   [method 1] apksigner binary: ${APKSIGNER_BIN:-<not found>}"
+              if [ -n "$APKSIGNER_BIN" ]; then
+                SIG_OUT="/tmp/apksig_$$.txt"
+                set +e
+                "$APKSIGNER_BIN" verify --print-certs --verbose "$apk" > "$SIG_OUT" 2>&1
+                RC=$?
+                set -e
+                echo "   [method 1] apksigner verify rc=$RC"
+                if [ "$RC" -eq 0 ]; then
+                  # apksigner 格式: "Signer #1 certificate SHA-256 digest: XX:XX:..." 或
+                  #                "WARNING: ... verified using v1 scheme only" + SHA-256 digest
+                  APK_SHA="$(grep -oEi "SHA-?256[[:space:]-]*digest:[[:space:]]*[0-9a-fA-F:]{95,}" "$SIG_OUT" \
+                            | head -1 | sed -E 's/SHA-?256[[:space:]-]*digest:[[:space:]]*//I')"
+                  SIGNER_NAME="$(grep -Ei "Signer #[0-9]+ certificate (DN|subject|Issuer|Owner):" "$SIG_OUT" | head -2 || true)"
+                  if [ -z "$APK_SHA" ]; then
+                    # 某些版本会写成 "Cert SHA-256: ..."
+                    APK_SHA="$(grep -oEi "Cert[[:space:]-]*SHA-?256:[[:space:]]*[0-9a-fA-F:]{95,}" "$SIG_OUT" \
+                              | head -1 | sed -E 's/.*SHA-?256:[[:space:]]*//I')"
+                  fi
+                  APK_SIGNER_INFO="${SIGNER_NAME}${NL:-$(printf '\n')}(apksigner)"
+                fi
+                echo "   [method 1] output tail:"
+                tail -15 "$SIG_OUT" 2>/dev/null || true
+                rm -f "$SIG_OUT"
+              fi
             fi
 
-            # 方法 B：从 META-INF/*.RSA (v1 scheme / jar signing) 兜底提取 Owner+SHA-256
+            # 方法 2：unzip 解 APK 的 META-INF/*.RSA / .EC / .DSA，再用 3 种子工具提取
             if [ -z "$APK_SHA" ]; then
-              CERT_DER="$(mktemp).RSA"
-              set +e
-              unzip -p "$apk" META-INF/*.RSA > "$CERT_DER" 2>/dev/null
-              RC=$?
-              set -e
-              if [ $RC -eq 0 ] && [ -s "$CERT_DER" ]; then
-                OUT="$(keytool -printcert -file "$CERT_DER" 2>/dev/null)"
-                SUBJECT="$(echo "$OUT" | grep -E "^Owner:" | head -1)"
-                echo "   APK 内 META-INF/*.RSA → $SUBJECT"
-                APK_SHA="$(echo "$OUT" \
-                          | grep -oE "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
-                          | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//')"
-                echo "   keytool SHA-256：$APK_SHA"
-                rm -f "$CERT_DER"
+              echo "   [method 2] 尝试从 META-INF 解出签名块 (v1 jar scheme)"
+              RSA_OUT="/tmp/apk_cert_$$.out"
+              rm -f "$RSA_OUT"
+              # 取 APK 中第一个非 SF 的签名文件（.RSA / .EC / .DSA）
+              CANDIDATE_NAME="$(unzip -l "$apk" 2>/dev/null \
+                | grep -oE "META-INF/[^ ]*\.(RSA|EC|DSA)" \
+                | head -1 || true)"
+              echo "   [method 2] candidate=$CANDIDATE_NAME"
+              if [ -n "$CANDIDATE_NAME" ]; then
+                SIGFILE="/tmp/apk_sig_$$.sig"
+                rm -f "$SIGFILE"
+                unzip -p "$apk" "$CANDIDATE_NAME" > "$SIGFILE" 2>/dev/null || true
+                if [ -s "$SIGFILE" ]; then
+                  echo "   [method 2] ${CANDIDATE_NAME} 提取成功, size=$(wc -c < "$SIGFILE") bytes"
+                  # 2a) keytool -printcert -file (最稳，覆盖 PKCS7 包裹的证书)
+                  set +e
+                  KT_OUT="$(keytool -printcert -file "$SIGFILE" 2>/dev/null)"
+                  RC=$?
+                  set -e
+                  if [ "$RC" -eq 0 ] && [ -n "$KT_OUT" ]; then
+                    echo "   [method 2a] keytool -printcert Subject line:"
+                    echo "$KT_OUT" | grep -E "^(Owner|Issuer|SHA-?256):" | head -5
+                    APK_SHA="$(echo "$KT_OUT" \
+                              | grep -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                              | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//I')"
+                    APK_SIGNER_INFO="$(echo "$KT_OUT" | grep -E "^(Owner|Issuer):" | head -2 || true)"
+                  fi
+
+                  # 2b) openssl pkcs7 -inform DER -print_certs → openssl x509 -fingerprint -sha256
+                  if [ -z "$APK_SHA" ] && command -v openssl >/dev/null 2>&1; then
+                    CERTS_PEM="/tmp/apk_certs_$$.pem"
+                    openssl pkcs7 -inform DER -in "$SIGFILE" -print_certs -out "$CERTS_PEM" 2>/dev/null || true
+                    if [ -s "$CERTS_PEM" ]; then
+                      FIRST_PEM="/tmp/apk_first_$$.pem"
+                      awk 'BEGIN{c=0} /-----BEGIN CERTIFICATE-----/{c++} c==1{print} c>=1 && /-----END CERTIFICATE-----/{exit}' "$CERTS_PEM" > "$FIRST_PEM"
+                      if [ -s "$FIRST_PEM" ]; then
+                        SUBJ="$(openssl x509 -in "$FIRST_PEM" -noout -subject 2>/dev/null || true)"
+                        FP="$(openssl x509 -in "$FIRST_PEM" -noout -fingerprint -sha256 2>/dev/null || true)"
+                        APK_SHA="$(echo "$FP" | sed -E 's/^SHA256=//' | tr -d '\r')"
+                        APK_SIGNER_INFO="openssl subject=$SUBJ"
+                        rm -f "$CERTS_PEM" "$FIRST_PEM"
+                      fi
+                    fi
+                  fi
+
+                  # 2c) keytool -printcert -jarfile (JDK 老路径)
+                  if [ -z "$APK_SHA" ]; then
+                    set +e
+                    KT2_OUT="$(keytool -printcert -jarfile "$apk" 2>&1)"
+                    RC=$?
+                    set -e
+                    if [ "$RC" -eq 0 ] && [ -n "$KT2_OUT" ]; then
+                      APK_SHA="$(echo "$KT2_OUT" \
+                                | grep -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                                | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//I')"
+                      APK_SIGNER_INFO="$(echo "$KT2_OUT" | grep -E "^(Owner|Issuer):" | head -2 || true)"
+                    fi
+                  fi
+                fi
+                rm -f "$SIGFILE"
               fi
             fi
 
+            # 方法 3：jarsigner -verify -verbose -certs（JDK 自带，最老版本也能跑）
             if [ -z "$APK_SHA" ]; then
-              echo "   ❌ 两种方式都没能提取到证书 SHA-256 → 这 APK 极可能未签名"
+              echo "   [method 3] jarsigner 兜底"
+              set +e
+              JS_OUT="$(jarsigner -verify -verbose -certs "$apk" 2>&1)"
+              RC=$?
+              set -e
+              if [ "$RC" -eq 0 ] || [ -n "$JS_OUT" ]; then
+                APK_SHA="$(echo "$JS_OUT" \
+                          | grep -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                          | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//I')"
+                APK_SIGNER_INFO="jarsigner signer=$(echo "$JS_OUT" | grep -m1 -oE "CN=[^,]+")"
+              fi
+            fi
+
+            if [ -n "$APK_SIGNER_INFO" ]; then
+              echo "   🔏 Signer 信息:"
+              echo "$APK_SIGNER_INFO" | sed 's/^/        /'
+            fi
+
+            if [ -z "$APK_SHA" ]; then
+              echo "   ❌ 以上 3 类方法都没能提取到证书 SHA-256"
+              echo "      → 常见原因：(a) APK 确实没被签；(b) flutter 用 Android Gradle Plugin 新版本默认"
+              echo "         v2/v3-only scheme，导致 META-INF/*.RSA 为空，但 apksigner 也拿不到，说明"
+              echo "         signingConfig=release 根本没生效；(c) Android SDK build-tools 中 apksigner"
+              echo "         不在 PATH 中，且 JDK 的 jarsigner/keytool 都读不到 v2-only scheme 的证书。"
+              echo "      → 下一步诊断：直接在 Build APK 段末尾用 ./gradlew signingReport 看 release signingConfig 到底是谁"
               exit 10
             fi
+            echo "   🔑 APK 证书 SHA-256 提取成功：$APK_SHA"
 
             GOT="$(NORMALIZE_FP "$APK_SHA")"
             if [ "$GOT" = "$EXP" ]; then
