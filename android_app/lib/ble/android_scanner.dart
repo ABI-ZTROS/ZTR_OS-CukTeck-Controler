@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../utils/logger/logger.dart';
+import '../utils/logger/logger.dart' hide LogLevel;
 import '../protocol/constants.dart';
 
 /// 扫描失败的细粒度原因 — 让 UI 分情况给出中文提示，而不仅是"未找到设备"
@@ -342,7 +342,6 @@ class AndroidScanner {
         continuousUpdates: true,
         androidUsesFineLocation: true,
         androidScanMode: AndroidScanMode.lowLatency,
-        androidAllowDuplicates: true,
       );
       await stop();
       AppLogger.instance.i(

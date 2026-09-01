@@ -279,7 +279,12 @@ def _find_uncommented_debug_inside_release(text: str) -> list[tuple[int, str]]:
                 if stripped.startswith("//") or stripped.startswith("/*"):
                     continue
                 has_bad = re.search(
-                    r"\bsigningConfig\b\s*(?:=)?\s*\(?\s*signingConfigs\.debug\b\s*\)?\s*[;,]?\s*$",
+                    r"\bsigningConfig\b\s*(?:=)?\s*\(?\s*signingConfigs\.(?:"
+                    r"debug\b"
+                    r"|getByName\s*\(\s*[\"']debug[\"']\s*\)"
+                    r"|named\s*\(\s*[\"']debug[\"']\s*\)"
+                    r"|maybeCreate\s*\(\s*[\"']debug[\"']\s*\)"
+                    r")\)?\s*[;,]?\s*$",
                     ln,
                 ) is not None
                 if has_bad:
@@ -544,20 +549,28 @@ def _patch_release_block(block_lines: list[str], *, is_kts: bool) -> list[str]:
         if stripped.startswith("//") or stripped.startswith("/*"):
             cleaned.append(ln)
             continue
-        # 匹配行内是否包含 signingConfig...signingConfigs.debug（容忍括号/尾随分号/空格）
-        # KTS 风格: signingConfig = signingConfigs.debug
-        # Groovy 风格: signingConfig signingConfigs.debug
-        # 还有诡异写法: signingConfig = (signingConfigs.debug)
-        bad_re = re.compile(
-            r"\bsigningConfig\b"                       # signingConfig 关键字
-            r"\s*(?:=)?"                               # 可选 =
-            r"\s*\(?"                                  # 可选 (
-            r"\s*signingConfigs\.debug\b"              # signingConfigs.debug
-            r"\s*\)?"                                  # 可选 )
-            r"\s*[;,]?"                                # 可选 ; ,
-            r"\s*$"                                    # 行尾
+        # 匹配行内 **未注释** 的 signingConfigs.debug 引用（所有常见写法都要覆盖）。
+        # 命中则整行注释化，避免 release 继续复用 debug key。
+        # 必须覆盖的变体：
+        #   A. signingConfig = signingConfigs.debug                 (KTS 直接赋值)
+        #   B. signingConfig signingConfigs.debug                   (Groovy 省略 =)
+        #   C. signingConfig = signingConfigs.getByName("debug")    (KTS 命名域查找)
+        #   D. signingConfig signingConfigs.getByName('debug')      (Groovy 单引号版命名域)
+        #   E. signingConfig = (signingConfigs.debug)               (括号包装)
+        # 支持行尾带 ; , 以及尾随空白。
+        debug_ref_re = re.compile(
+            r"\bsigningConfig\b"
+            r"\s*(?:=)?"
+            r"\s*\(?"
+            r"\s*signingConfigs\.(?:"
+            r"debug\b"
+            r"|getByName\s*\(\s*[\"']debug[\"']\s*\)"
+            r"|named\s*\(\s*[\"']debug[\"']\s*\)"
+            r"|maybeCreate\s*\(\s*[\"']debug[\"']\s*\)"
+            r")\)?"
+            r"\s*[;,]?\s*$"
         )
-        if bad_re.search(ln):
+        if debug_ref_re.search(ln):
             # 整行注释化（保留原缩进、保留原行内容）
             indent = re.match(r"^([ \t]*)", ln).group(1)
             # 去掉尾部换行做处理

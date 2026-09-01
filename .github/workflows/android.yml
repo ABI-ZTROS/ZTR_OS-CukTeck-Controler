@@ -131,16 +131,91 @@ jobs:
           echo "=== 最终 build.gradle 头 50 行 ==="
           head -50 "$GRADLE"
           echo
-          echo "=== 最终 release buildType 段 ==="
-          awk '
-            /buildTypes[[:space:]]*\{/ { in_bt=1 }
-            in_bt { print NR": "$0 }
-            /release[[:space:]]*\{|getByName\(\"release\"\)\{/ { in_r=1 }
-            in_r { print NR": RELEASE >> "$0 }
-            # 括号平衡简单计数：遇到 { +1，遇到 } -1
-            in_r && /\{/ { bc++; next }
-            in_r && /\}/ { bc--; if (bc==0) { in_r=0; in_bt=0 } }
-          ' "$GRADLE"
+          echo "=== 最终 release buildType 段（Python 解析，括号平衡准确，无 awk 转义 warning） ==="
+          python3 - "$GRADLE" <<'PY'
+import sys, re
+path = sys.argv[1]
+lines = open(path).read().splitlines(keepends=True)
+# 找 buildTypes {...}
+bt_re = re.compile(r"\bbuildTypes\s*\{")
+i = 0
+while i < len(lines):
+    m = bt_re.search(lines[i])
+    if not m:
+        i += 1
+        continue
+    brace_open_idx_in_line = m.end() - 1
+    depth = 0
+    started = False
+    j = i
+    bt_end = -1
+    while j < len(lines):
+        s = lines[j]
+        start_pos = brace_open_idx_in_line if j == i else 0
+        for k in range(start_pos, len(s)):
+            c = s[k]
+            if c == "{":
+                depth += 1
+                started = True
+            elif c == "}":
+                depth -= 1
+            if started and depth == 0:
+                bt_end = j
+                break
+        else:
+            j += 1
+            continue
+        break
+    if bt_end < 0:
+        i += 1
+        continue
+    # 在 buildTypes 内部打印，同时高亮 release 子块
+    rel_re = re.compile(r"(\brelease\s*\{)|(getByName\s*\(\s*[\"']release[\"']\s*\)\s*\{)|(named\s*\(\s*[\"']release[\"']\s*\)\s*\{)")
+    sub = lines[i:bt_end + 1]
+    si = 0
+    # 先把所有 release 块区间找出来
+    rel_ranges = []
+    while si < len(sub):
+        mm = rel_re.search(sub[si])
+        if not mm:
+            si += 1
+            continue
+        brace_open_idx_in_line = mm.end() - 1
+        depth2 = 0
+        started2 = False
+        jj = si
+        re_end = -1
+        while jj < len(sub):
+            ss = sub[jj]
+            spp = brace_open_idx_in_line if jj == si else 0
+            for kk in range(spp, len(ss)):
+                c = ss[kk]
+                if c == "{":
+                    depth2 += 1
+                    started2 = True
+                elif c == "}":
+                    depth2 -= 1
+                if started2 and depth2 == 0:
+                    re_end = jj
+                    break
+            else:
+                jj += 1
+                continue
+            break
+        if re_end < 0:
+            si += 1
+            continue
+        rel_ranges.append((si, re_end))
+        si = re_end + 1
+    # 输出
+    for li in range(len(sub)):
+        idx = i + li + 1
+        ln = sub[li].rstrip("\n")
+        in_rel = any(a <= li <= b for a, b in rel_ranges)
+        flag = "RELEASE >> " if in_rel else ""
+        print(f"{idx:>3}: {flag}{ln}")
+    i = bt_end + 1
+PY
 
       # ------------ 3. Flutter 构建（release + split-per-abi） ------------
       - name: Build APK — release 签名
