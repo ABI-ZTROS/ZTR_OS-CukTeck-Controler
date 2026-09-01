@@ -181,6 +181,68 @@ class XiaomiLoginController {
     return resp;
   }
 
+  /// 手动跟随重定向的 GET —— 每一步都提取 Set-Cookie！
+  /// Python requests 默认 allow_redirects=True，中间步骤的 cookies 都会被收集。
+  /// Dart http 跟随重定向时中间 cookies 会丢失，所以我们手动处理。
+  Future<http.Response> _getFollowRedirects(
+    String url, {
+    Map<String, String>? params,
+    int maxRedirects = 10,
+  }) async {
+    String? currentUrl;
+    http.Response? lastResp;
+    int step = 0;
+
+    while (step < maxRedirects) {
+      final uri = Uri.parse(currentUrl ?? url).replace(
+        queryParameters: (step == 0 && params != null) ? params : null,
+      );
+      final cookieHeader = _buildCookieHeader();
+
+      final req = http.Request('GET', uri)
+        ..headers['User-Agent'] = _agent
+        ..headers['Cookie'] = cookieHeader
+        ..followRedirects = false;
+
+      _emitDebug('  ↳ [redirect step $step] GET ${uri.path}${uri.query.isNotEmpty ? '?' + uri.query : ''}');
+      final streamed = await _httpClient.send(req);
+      final resp = await http.Response.fromStream(streamed);
+
+      // 提取这一步的 cookies！
+      final setCookieHeader = resp.headers['set-cookie'] ?? '';
+      if (setCookieHeader.isNotEmpty) {
+        final newCookies = _extractSetCookies(setCookieHeader);
+        _sessionCookies.addAll(newCookies);
+        _emitDebug('    ← collected cookies: [${newCookies.keys.join(",")}]');
+      } else {
+        _emitDebug('    ← no Set-Cookie in this step');
+      }
+      _emitDebug('    → ${resp.statusCode}, ALL session=[${_sessionCookies.keys.join(",")}]');
+      if (_sessionCookies.containsKey('serviceToken')) {
+        _emitDebug('      serviceToken len=${_sessionCookies['serviceToken']!.length}');
+      }
+
+      lastResp = resp;
+
+      if (resp.statusCode >= 300 &&
+          resp.statusCode < 400 &&
+          resp.headers['location'] != null) {
+        var next = resp.headers['location']!;
+        _emitDebug('    → redirecting to: ${next.substring(0, next.length > 100 ? 100 : next.length)}...');
+        if (!next.startsWith('http')) {
+          final baseUri = Uri.parse(currentUrl ?? url);
+          next = '${baseUri.scheme}://${baseUri.host}${next}';
+        }
+        currentUrl = next;
+        step++;
+      } else {
+        break;
+      }
+    }
+
+    return lastResp!;
+  }
+
   String _buildCookieHeaderWith(Map<String, String> cookies) {
     final all = <String, String>{'sdkVersion': _sdkVersion, ...cookies};
     return all.entries.map((e) => '${e.key}=${e.value}').join('; ');
@@ -383,10 +445,16 @@ class XiaomiLoginController {
         location = 'https://account.xiaomi.com$location';
       }
       _emitDebug('═══════ Step 8: follow location ═══════');
-      _emitDebug('GET ${_truncate(location, 80)}');
-      final r8 = await _get(location);
-      _emitDebug('  ↳ ${r8.statusCode}');
-      _emitDebug('  ↳ session cookies NOW: [${_sessionCookies.keys.join(",")}]');
+      _emitDebug('GET ${_truncate(location, 80)} (WITH redirect follow!)');
+      final r8 = await _getFollowRedirects(location);
+      _emitDebug('  ↳ final status=${r8.statusCode}');
+      _emitDebug('  ↳ FINAL cookies NOW: [${_sessionCookies.keys.join(",")}]');
+      if (_sessionCookies.containsKey('serviceToken')) {
+        _emitDebug('  ↳ serviceToken LEN=${_sessionCookies['serviceToken']!.length}');
+      }
+      if (_sessionCookies.containsKey('passToken')) {
+        _emitDebug('  ↳ passToken LEN=${_sessionCookies['passToken']!.length}');
+      }
 
       // Step 8.5: CLEAN
       _emitDebug('═══════ Step 8.5: CLEAN cookies ═══════');
@@ -480,37 +548,40 @@ class XiaomiLoginController {
     String userId,
     String nonce,
   ) async {
-    AppLogger.instance.i('XiaomiLogin',
-        'Completing login: ssec=${_truncate(ssecurity, 8)}');
-
-    // Python: follow location, then serviceToken 自动在 cookies 里
+    _emitDebug('═══════ Step 11: follow location for serviceToken ═══════');
     final nsec = 'nonce=$nonce&$ssecurity';
     final clientSign =
         base64.encode(sha1.convert(utf8.encode(nsec)).bytes);
     final fullLocation =
         '$location&clientSign=${Uri.encodeQueryComponent(clientSign)}';
 
-    final r = await _get(fullLocation);
-    AppLogger.instance.i('XiaomiLogin',
-        'completeLogin: status=${r.statusCode}, '
-        'final cookies=${_sessionCookies.keys.join(",")}');
+    _emitDebug('GET ${_truncate(fullLocation, 100)} (WITH redirect follow!)');
+    final r = await _getFollowRedirects(fullLocation);
+    _emitDebug('  ↳ final status=${r.statusCode}');
+    _emitDebug('  ↳ FINAL cookies: [${_sessionCookies.keys.join(",")}]');
 
     serviceToken = _sessionCookies['serviceToken'];
     this.ssecurity = ssecurity;
     this.userId = userId;
 
-    if (serviceToken == null) {
-      // fallback: try parse response body
+    if (serviceToken != null) {
+      _emitDebug('  ✅ serviceToken len=${serviceToken!.length}');
+    } else {
+      _emitDebug('  ❌ No serviceToken in cookies! Trying body parse...');
       try {
         final body = r.body.replaceAll('&&&START&&&', '').trim();
         final j = jsonDecode(body) as Map<String, dynamic>;
         serviceToken = j['serviceToken'] as String?;
-      } catch (_) {}
+        if (serviceToken != null) {
+          _emitDebug('  ✅ serviceToken found in body len=${serviceToken!.length}');
+        }
+      } catch (e) {
+        _emitDebug('  ❌ Body parse also failed: $e');
+      }
     }
 
     if (serviceToken == null) {
-      AppLogger.instance.e('XiaomiLogin',
-          '❌ No serviceToken! Cookies: ${_sessionCookies.keys}');
+      _emitDebug('  ❌ GIVING UP — no serviceToken anywhere');
       _controller.add(LoginEvent.error('无法获取 serviceToken'));
       return;
     }
