@@ -35,6 +35,11 @@ jobs:
           if [ -d android-app-custom/manifest/res ]; then
             cp -r android-app-custom/manifest/res/* android/app/src/main/res/
           fi
+          # 🔐 Override build.gradle.kts with pre-written signing config
+          if [ -f android-app-custom/build.gradle.kts ]; then
+            cp android-app-custom/build.gradle.kts android/app/build.gradle.kts
+            echo "✅ build.gradle.kts overridden with signingConfigs (CN=Dev.Cloud.ZTR_OS)"
+          fi
 
       - name: 🔐 Setup signing — keystore + key.properties
         run: |
@@ -45,42 +50,6 @@ jobs:
           keyAlias=dev.cloud.ztr_os
           storeFile=upload-keystore.jks
           PROPS
-
-      - name: 🔐 Inject signingConfigs into build.gradle.kts
-        working-directory: android_app
-        run: |
-          # ---- Build signing config block as temp file ----
-          cat > /tmp/signing_block.kts << 'BLOCK'
-          import java.util.Properties
-
-          val keystorePropertiesFile = rootProject.file("key.properties")
-          val keystoreProperties = Properties()
-          keystoreProperties.load(keystorePropertiesFile.inputStream())
-
-          signingConfigs {
-              create("release") {
-                  keyAlias = keystoreProperties.getProperty("keyAlias")
-                  keyPassword = keystoreProperties.getProperty("keyPassword")
-                  storeFile = file("${rootProject.projectDir}/app/${keystoreProperties.getProperty("storeFile")}")
-                  storePassword = keystoreProperties.getProperty("storePassword")
-              }
-          }
-          BLOCK
-
-          # ---- Insert after "android {" ----
-          # Use awk: print line, then if line matches "android {", print signing block
-          awk 'NR==FNR{block[NR]=$0; n=NR; next}
-               /android[[:space:]]*\{/{print; for(i=1;i<=n;i++) print block[i]; print ""; next}
-               {print}' /tmp/signing_block.kts android/app/build.gradle.kts > /tmp/build_new.kts
-          mv /tmp/build_new.kts android/app/build.gradle.kts
-
-          # ---- Add signingConfig to release buildType ----
-          # Flutter template: 'release { isMinifyEnabled = false' → inject signingConfig line
-          sed -i 's/release {/release {\n                    signingConfig = signingConfigs.getByName("release")/' android/app/build.gradle.kts
-
-          echo "=== Verifying injection ==="
-          grep -c "signingConfig" android/app/build.gradle.kts || true
-          grep -c "signingConfigs" android/app/build.gradle.kts || true
 
       - name: Build APK — Dev.Cloud.ZTR_OS signed
         working-directory: android_app
