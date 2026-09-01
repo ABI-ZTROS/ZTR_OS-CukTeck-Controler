@@ -210,7 +210,7 @@ class _HomePageState extends State<HomePage>
           deviceName: dev.name,
           deviceModel: dev.model,
         );
-        await _tokenService.selectAndSave(cfg);
+        await store.write(cfg);
 
         // 同时更新云凭证里的 did/beaconKey
         final existing = await store.readCloud();
