@@ -243,15 +243,41 @@ class _HomePageState extends State<HomePage>
       _errorMessage = null;
     });
     try {
-      final results = await _scanner.start();
+      // ⚠️ 走带诊断的 startWithDiagnosis() — 闸门里会请求权限/检查蓝牙开关
+      final ScannerOutcome outcome = await _scanner.startWithDiagnosis();
+      final List<CuktechScanResult> results = outcome.results;
+      final ScanDiagnosis diag = outcome.diagnosis;
+
       if (results.isNotEmpty) {
         await _connect(results.first);
-      } else {
-        setState(() {
-          _isScanning = false;
-          _errorMessage = '未发现设备，请确认充电器已通电';
-        });
+        return;
       }
+
+      // --------- 空结果：使用 ScanDiagnosis 给出精确中文原因 ---------
+      setState(() {
+        _isScanning = false;
+        final String diagStats =
+            '（raw=${diag.totalRawDevices} fe95≠660E=${diag.fe95SeenButWrongPid}）';
+        switch (diag.failReason) {
+          case ScanFailReason.bleUnsupported:
+            _errorMessage = '🚫 不支持 BLE\n${diag.message}';
+            break;
+          case ScanFailReason.adapterOff:
+            _errorMessage = '🔵 蓝牙未打开\n${diag.message}';
+            break;
+          case ScanFailReason.permissionDenied:
+            _errorMessage =
+                '🛡️ 缺少权限 $diagStats\n${diag.message}\n\n点击"扫码重试"会再次弹窗申请。';
+            break;
+          case ScanFailReason.runtimeError:
+            _errorMessage = '⚠️ 扫描出错 $diagStats\n${diag.message}';
+            break;
+          case ScanFailReason.noneFound:
+            // 正常执行完但没命中 — 给出最精确的分类提示
+            _errorMessage = '🔎 未发现设备 $diagStats\n${diag.message}';
+            break;
+        }
+      });
     } catch (e) {
       setState(() {
         _isScanning = false;

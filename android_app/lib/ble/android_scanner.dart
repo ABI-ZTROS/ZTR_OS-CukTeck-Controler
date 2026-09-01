@@ -1,8 +1,61 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../utils/logger/logger.dart';
 import '../protocol/constants.dart';
+
+/// 扫描失败的细粒度原因 — 让 UI 分情况给出中文提示，而不仅是"未找到设备"
+enum ScanFailReason {
+  /// 一切正常但真的没搜到目标
+  noneFound,
+
+  /// 设备不支持 BLE (uses-feature 不符合)
+  bleUnsupported,
+
+  /// 蓝牙适配器未打开或不可用
+  adapterOff,
+
+  /// 缺少运行时权限（BLUETOOTH_SCAN / BLUETOOTH_CONNECT / LOCATION 之一被拒）
+  permissionDenied,
+
+  /// scan() 抛了平台异常（例如 AirplaneMode 下的系统拦截）
+  runtimeError,
+}
+
+class ScanDiagnosis {
+  const ScanDiagnosis({
+    required this.failReason,
+    required this.totalRawDevices,
+    required this.cuktechMatched,
+    required this.fe95SeenButWrongPid,
+    this.message,
+    this.missingPermissions = const <Permission>[],
+  });
+
+  final ScanFailReason failReason;
+
+  /// 扫描期间一共回调过多少台唯一 BLE 设备（不挑协议）
+  /// =0：权限/蓝牙/飞机模式 直接把回调掐了
+  /// >0：回调正常，只是 FE95 匹配没中
+  final int totalRawDevices;
+
+  /// 真正命中 isCuktech=true 的台数（就是我们展示结果的台数）
+  final int cuktechMatched;
+
+  /// 广播里有 FE95 serviceData key 但 product_id≠0x660E 的台数
+  final int fe95SeenButWrongPid;
+
+  /// 给 UI/日志看的详细文本
+  final String? message;
+
+  /// 缺失的权限列表（仅 failReason=permissionDenied 时有）
+  final List<Permission> missingPermissions;
+
+  bool get isOk =>
+      failReason == ScanFailReason.noneFound && cuktechMatched > 0;
+}
 
 /// 扫描结果
 class CuktechScanResult {
@@ -30,73 +83,70 @@ class CuktechScanResult {
 ///   byte  4   : frame_counter
 ///   bytes 5-10: MAC (6 bytes LE, 可选)
 ///   bytes 11+ : payload
-///
-/// 参考: ha-cuk-ble/custom_components/cuktech_ble/lib/fe95.py
 int? _parseFe95ProductId(List<int> data) {
   if (data.length < 5) return null;
   return data[2] | (data[3] << 8); // LE uint16
 }
 
-/// AD1204U 产品 ID (小端 0x660E)
 const int _ad1204ProductId = 0x660E;
 
-/// 规范化 Guid 字符串用于跨 FBP 版本比较：统一去横线、小写
+/// 规范化 Guid 字符串：去横线、转小写。避免 FBP 128/16 位 Guid key 对比坑。
 String _normGuidStr(String s) => s.replaceAll('-', '').toLowerCase();
 
-/// 小米 IoT 16-bit Service UUID = 0xFE95 的 128 位形式（去掉横线小写）：
-///   0000fe9500001000800000805f9b34fb
 final String _fe95Norm128 = _normGuidStr(uuidFe95);
-
-/// 16-bit 短形式（去掉横线、补零后取前 8 位中的后 4 位 → fe95）
-/// 也可能是 Guid('FE95') / Guid('fe95') 作为短 key 直接存
 const List<String> _fe95ShortCandidates = <String>['fe95', '0xfe95', '0000fe95'];
 
-/// 在 AdvertisementData.serviceData 里稳健查找小米 FE95 条目：
-/// - FlutterBluePlus 不同版本、Android/iOS，map key 形式不一定相同
-///   可能是 Guid('0000FE95-…') / Guid('fe95') / Guid('FE95') 中的任何一种
-/// - Guid.operator== 不同 FBP 实现不靠谱：直接 toByteArray 或 toString 都有坑
-/// - 因此：**遍历所有 key**，转成字符串 → 规范化，匹配任一候选
+/// 多形态查找：serviceData 的 key 可能以 Guid('FE95')/Guid('fe95')/
+/// Guid('0000FE95-…')/Guid('0000fe95') 等任何形态出现
 List<int>? _lookupFe95ServiceData(Map<Guid, List<int>> serviceData) {
   if (serviceData.isEmpty) return null;
   for (final MapEntry<Guid, List<int>> e in serviceData.entries) {
     final String norm = _normGuidStr(e.key.toString());
-    // 128 位完全相等
     if (norm == _fe95Norm128) return e.value;
-    // 16 位短形式
     for (final String s in _fe95ShortCandidates) {
       if (norm == s || norm.endsWith(s) || norm.startsWith(s)) return e.value;
     }
-    // 最终兜底：任何 key 只要包含 fe95 就是小米 IoT 的那条
     if (norm.contains('fe95')) return e.value;
   }
   return null;
 }
 
-/// Android BLE 扫描器（基于 flutter_blue_plus）
+/// 一次扫描的最终结果（成功列表 + 诊断元数据）
+class ScannerOutcome {
+  const ScannerOutcome(this.results, this.diagnosis);
+  final List<CuktechScanResult> results;
+  final ScanDiagnosis diagnosis;
+}
+
+/// Android BLE 扫描器（基于 flutter_blue_plus 1.32）
 ///
-/// 🔑 识别策略（已对齐 ha-cuk-ble / cuktech-ble-server 参照项目）：
-///   1. **硬件层**: 全量扫描 — 不使用 withServices 过滤
-///      ❌ Android ScanFilter.setServiceUuid() 只匹配 AD 0x02/0x03
-///         (Service UUID List)，而小米 IoT 设备把 FE95 放在 AD 0x16
-///         (Service Data) 里 — 硬件过滤会直接把充电器挡掉
-///   2. **Dart 层**: 遍历 advertisementData.serviceData 的 key，
-///      多形态匹配 FE95（解决 FBP 1.32 Guid key 对比坑）
-///   3. **进阶验证**: 解析 FE95 service-data frame 里的 product_id
-///      是否等于 0x660E (AD1204U) — 避免误识别其他小米设备
-///   4. **androidScanMode = lowLatency + continuousUpdates（allowDuplicates=true）**
-///      — 老安卓只发"首次看到"事件；如果系统已经缓存了充电器，
-///      `onScanResults` 可能一条都不回调 → 会让用户看到"未找到设备"。
-///      FBP 上通过 `continuousUpdates: true` + `androidAllowDuplicates: true`
-///      强制每个广播帧都回调，保证 cache hit 也能进入 callback。
-///
-/// ⚠️ 为什么不靠名字？米家可以远程改设备蓝牙广播名！
-///    改名字不影响 FE95 广播数据（那是协议层字段）。
+/// 修复清单（2026-09-01 TDD 第 2 轮 — 用户报"还是未找到设备"）：
+///  ① Manifest 有声明但**未动态请求权限** → 新增加 ensurePermissions()
+///     主动申请 BLUETOOTH_SCAN / BLUETOOTH_CONNECT /
+///     ACCESS_FINE_LOCATION / POST_NOTIFICATIONS
+///  ② 没检查蓝牙是否打开 → 新增加 ensureAdapterOn()
+///     查 isSupported + adapterState.onNow；否则直接拒绝并提示
+///  ③ "未找到设备"无诊断 → 输出 ScannerOutcome.diagnosis：
+///     totalRawDevices=0 → 权限/适配器被拦截；
+///     totalRawDevices>0 + cuktechMatched=0 + fe95SeenButWrongPid>0 → 周围有
+///     其他小米设备但没有 AD1204U；
+///     totalRawDevices>0 + fe95SeenButWrongPid=0 → 没抓到 AD 0x16 里的 FE95
+///  ④ 兜底：每台原始设备都 D 级别 log 一条，包括
+///     name/rssi/manufacturerData/serviceData.keys/serviceUuids
+///     → 用户把日志发回来我们一眼就能看出"广播 key 长啥样"
+///  ⑤ FBP 开 verbose log（debug 模式）
 class AndroidScanner {
   AndroidScanner._();
   static final AndroidScanner instance = AndroidScanner._();
 
-  /// 用 remoteId 作 key 去重，避免同设备多个 RSSI 采样把 list 挤爆
   final Map<String, CuktechScanResult> _resultsById = <String, CuktechScanResult>{};
+
+  /// 原始设备集合（不挑协议，用于诊断：看扫描到底有没有回调进来）
+  final Set<String> _rawSeenIds = <String>{};
+
+  /// 有 FE95 key 但是 product_id 不是 0x660E 的设备计数（小米台灯/净化器等）
+  int _fe95WrongPid = 0;
+
   StreamSubscription<List<ScanResult>>? _sub;
   bool _isScanning = false;
 
@@ -104,51 +154,176 @@ class AndroidScanner {
   List<CuktechScanResult> get results =>
       List<CuktechScanResult>.unmodifiable(_resultsById.values);
 
-  /// 开始扫描
-  ///
-  /// [timeout] 扫描时长（默认 10 秒）
-  /// [filterCuktech] 是否仅显示酷态科设备
-  Future<List<CuktechScanResult>> start({
+  // ============================== 前置闸门 ==============================
+
+  /// 运行时权限：蓝牙扫描 + 蓝牙连接 + (11-) 位置
+  static const List<Permission> _blePerms = <Permission>[
+    Permission.bluetoothScan,
+    Permission.bluetoothConnect,
+    Permission.locationWhenInUse,
+    Permission.bluetoothAdvertise,
+  ];
+
+  /// 申请权限并检查状态。返回值 = 缺失权限列表（空=全部OK）
+  Future<List<Permission>> ensurePermissions() async {
+    final Map<Permission, PermissionStatus> statuses =
+        await _blePerms.request();
+    final List<Permission> missing = <Permission>[];
+    statuses.forEach((Permission p, PermissionStatus s) {
+      if (!s.isGranted && !(p == Permission.bluetoothAdvertise)) {
+        missing.add(p);
+      }
+    });
+    // POST_NOTIFICATIONS 不阻塞扫描，单独申请不强制
+    unawaited(Permission.notification.request());
+    return missing;
+  }
+
+  /// 确认蓝牙已打开 + 设备支持 BLE；失败抛字符串给 UI catch
+  Future<bool> ensureAdapterOn() async {
+    try {
+      final bool supported = await FlutterBluePlus.isSupported;
+      if (!supported) return false;
+      final BluetoothAdapterState state = FlutterBluePlus.adapterStateNow;
+      if (state == BluetoothAdapterState.on) return true;
+      // 尝试 turnOn（仅 Android 可用）
+      try {
+        await FlutterBluePlus.turnOn();
+      } catch (_) {}
+      // 轮询最多 5 秒
+      for (int i = 0; i < 10; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+        if (FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on) {
+          return true;
+        }
+      }
+      return FlutterBluePlus.adapterStateNow == BluetoothAdapterState.on;
+    } catch (e) {
+      AppLogger.instance.e('AndroidScanner', 'ensureAdapterOn error: $e');
+      return false;
+    }
+  }
+
+  // ============================== 主入口 ==============================
+
+  /// 开始扫描（带闸门 + 诊断）
+  Future<ScannerOutcome> startWithDiagnosis({
     Duration timeout = const Duration(seconds: 10),
     bool filterCuktech = true,
   }) async {
+    // -------------- 闸门 1: BLE 支持 --------------
+    try {
+      if (!await FlutterBluePlus.isSupported) {
+        return _outcomeEmpty(
+          const ScanDiagnosis(
+            failReason: ScanFailReason.bleUnsupported,
+            totalRawDevices: 0,
+            cuktechMatched: 0,
+            fe95SeenButWrongPid: 0,
+            message: '本机硬件 / ROM 不支持低功耗蓝牙 (BLE)，无法使用本 App。',
+          ),
+        );
+      }
+    } catch (e) {
+      return _outcomeEmpty(ScanDiagnosis(
+        failReason: ScanFailReason.bleUnsupported,
+        totalRawDevices: 0,
+        cuktechMatched: 0,
+        fe95SeenButWrongPid: 0,
+        message: '蓝牙服务初始化失败：$e',
+      ));
+    }
+
+    // -------------- 闸门 2: 运行时权限 --------------
+    final List<Permission> missing = await ensurePermissions();
+    if (missing.isNotEmpty) {
+      return _outcomeEmpty(ScanDiagnosis(
+        failReason: ScanFailReason.permissionDenied,
+        totalRawDevices: 0,
+        cuktechMatched: 0,
+        fe95SeenButWrongPid: 0,
+        message: '缺少权限：${missing.join(", ")}，'
+            '请到「设置 → 应用 → 酷态科控制器 → 权限」允许蓝牙/附近设备/位置。',
+        missingPermissions: missing,
+      ));
+    }
+
+    // -------------- 闸门 3: 适配器 --------------
+    if (!await ensureAdapterOn()) {
+      return _outcomeEmpty(const ScanDiagnosis(
+        failReason: ScanFailReason.adapterOff,
+        totalRawDevices: 0,
+        cuktechMatched: 0,
+        fe95SeenButWrongPid: 0,
+        message: '蓝牙尚未打开，请在系统下拉开关里打开蓝牙后重试。',
+      ));
+    }
+
+    // -------------- 正式扫描 --------------
+    if (kDebugMode) {
+      try {
+        FlutterBluePlus.setLogLevel(LogLevel.verbose, color: false);
+      } catch (_) {}
+    }
+
     if (_isScanning) {
       AppLogger.instance.w('AndroidScanner', 'Already scanning');
-      return results;
+      return ScannerOutcome(results, _makeDiagnosis(ScanFailReason.noneFound));
     }
     _resultsById.clear();
+    _rawSeenIds.clear();
+    _fe95WrongPid = 0;
     _isScanning = true;
 
     try {
-      _sub = FlutterBluePlus.onScanResults.listen((results) {
-        for (final r in results) {
-          final name = r.advertisementData.localName ?? r.device.platformName ?? '';
+      _sub = FlutterBluePlus.onScanResults.listen((List<ScanResult> results) {
+        for (final ScanResult r in results) {
+          final String id = r.device.remoteId.str;
+          _rawSeenIds.add(id);
 
-          // ✅ 关键修复 #1：多形态匹配 serviceData 里的 FE95 key
-          //     解决 FlutterBluePlus Guid 对比：128 位 vs 16 位 vs 大小写不统一
+          final String name =
+              r.advertisementData.localName ?? r.device.platformName ?? '';
+
           final List<int>? fe95Bytes =
               _lookupFe95ServiceData(r.advertisementData.serviceData);
           final bool hasFe95 = fe95Bytes != null && fe95Bytes.isNotEmpty;
 
-          // 进阶：解析 product_id 验证是 AD1204U (0x660E)
-          // 避免把米家台灯、净化器等其他小米设备误判成酷态科
           final int? productId =
               hasFe95 ? _parseFe95ProductId(fe95Bytes!) : null;
           final bool isExactCuktech = productId == _ad1204ProductId;
 
-          // 名字里带 cuk 关键词（仅用于日志标记，不做过滤）
+          if (hasFe95 && !isExactCuktech) _fe95WrongPid++;
+
           final bool hasNameHint = name.toLowerCase().contains('cuk') ||
               name.toLowerCase().contains('charger') ||
               name.toLowerCase().contains('power');
 
           final bool isTarget = hasFe95 && isExactCuktech;
+
+          // ==== 【诊断兜底】不管是否命中，把原始广告打到 D log
+          // 这样用户复现失败时，直接把日志发我们即可看出 key 形态
+          final String serviceKeys = r.advertisementData.serviceData.keys
+              .map((Guid g) => _normGuidStr(g.toString()))
+              .join(',');
+          final String serviceUuids = r.advertisementData.serviceUuids
+              .map((Guid g) => _normGuidStr(g.toString()))
+              .take(5)
+              .join(',');
+          AppLogger.instance.d(
+            'AndroidScanner',
+            '📡 RAW id=$id rssi=${r.rssi} name="$name" '
+            'svcKeys=[$serviceKeys] svcUuids=[$serviceUuids] '
+            'fe95=$hasFe95 pid=0x${productId?.toRadixString(16).padLeft(4, '0') ?? '----'} '
+            'exact=$isExactCuktech nh=$hasNameHint',
+          );
+
           if (isTarget || !filterCuktech) {
             final String? hex = fe95Bytes == null || fe95Bytes.isEmpty
                 ? null
                 : fe95Bytes
                     .map((int b) => b.toRadixString(16).padLeft(2, '0'))
                     .join();
-            final CuktechScanResult res = CuktechScanResult(
+            _resultsById[id] = CuktechScanResult(
               device: r.device,
               rssi: r.rssi,
               localName: name,
@@ -156,25 +331,12 @@ class AndroidScanner {
               productId: productId,
               serviceDataHex: hex,
             );
-            // 去重（同 remoteId 覆盖，刷新 RSSI/广播字段）
-            _resultsById[r.device.remoteId.str] = res;
-            AppLogger.instance.d(
-              'AndroidScanner',
-              '📡 Found ${r.device.remoteId.str} rssi=${r.rssi} '
-              'name="$name" fe95=$hasFe95 productId=0x${productId?.toRadixString(16).padLeft(4, '0') ?? "----"} '
-              'exact=$isExactCuktech nameHint=$hasNameHint',
-            );
           }
         }
       }, onError: (Object e, StackTrace stackTrace) {
         AppLogger.instance.e('AndroidScanner', 'Scan error: $e', stackTrace);
       });
 
-      // ✅ 关键修复 #2：continuousUpdates=true + androidAllowDuplicates=true
-      //     防止 Android 缓存到的设备不触发 onScanResults（典型"米家能找到我不行"）
-      // ✅ 关键修复 #3：androidScanMode=lowLatency
-      //     即便 10 秒里只扫到一个广播帧，也能命中识别逻辑
-      // ✅ 依然不使用 withServices 硬件级过滤
       await FlutterBluePlus.startScan(
         timeout: timeout,
         continuousUpdates: true,
@@ -182,26 +344,53 @@ class AndroidScanner {
         androidScanMode: AndroidScanMode.lowLatency,
         androidAllowDuplicates: true,
       );
-
-      // startScan 带 timeout 会自动结束
       await stop();
-      AppLogger.instance.i('AndroidScanner',
-          '🔍 Scan done: ${_resultsById.length} device(s) found');
-      return results;
+      AppLogger.instance.i(
+          'AndroidScanner',
+          '🔍 done: cuktech=${_resultsById.length} '
+          'rawSeen=${_rawSeenIds.length} fe95WrongPid=$_fe95WrongPid');
+      return ScannerOutcome(
+          results, _makeDiagnosis(ScanFailReason.noneFound));
     } catch (e, stackTrace) {
       AppLogger.instance.e('AndroidScanner', 'Scan failed: $e', stackTrace);
       await stop();
-      rethrow;
+      return ScannerOutcome(
+        results,
+        ScanDiagnosis(
+          failReason: ScanFailReason.runtimeError,
+          totalRawDevices: _rawSeenIds.length,
+          cuktechMatched: _resultsById.length,
+          fe95SeenButWrongPid: _fe95WrongPid,
+          message: '扫描执行异常：$e',
+        ),
+      );
     }
   }
 
-  /// 停止扫描
+  /// 简单兼容 API（返回 List；诊断可在事后通过 lastDiagnosis 字段获取）
+  Future<List<CuktechScanResult>> start({
+    Duration timeout = const Duration(seconds: 10),
+    bool filterCuktech = true,
+  }) async {
+    final ScannerOutcome o = await startWithDiagnosis(
+      timeout: timeout,
+      filterCuktech: filterCuktech,
+    );
+    lastDiagnosis = o.diagnosis;
+    return o.results;
+  }
+
+  /// 最近一次扫描的诊断（HomePage 用它渲染详细中文原因）
+  ScanDiagnosis? lastDiagnosis;
+
   Future<void> stop() async {
     try {
       await _sub?.cancel();
       _sub = null;
       if (_isScanning) {
-        await FlutterBluePlus.stopScan();
+        try {
+          await FlutterBluePlus.stopScan();
+        } catch (_) {}
       }
     } catch (e, stackTrace) {
       AppLogger.instance.e('AndroidScanner', 'stop error: $e');
@@ -210,7 +399,6 @@ class AndroidScanner {
     }
   }
 
-  /// 扫描并返回第一个匹配的酷态科设备
   Future<CuktechScanResult?> findCuktech({
     Duration timeout = const Duration(seconds: 10),
   }) async {
@@ -221,5 +409,46 @@ class AndroidScanner {
     } on StateError {
       return null;
     }
+  }
+
+  // ============================== 工具 ==============================
+
+  ScannerOutcome _outcomeEmpty(ScanDiagnosis d) {
+    lastDiagnosis = d;
+    return ScannerOutcome(const <CuktechScanResult>[], d);
+  }
+
+  ScanDiagnosis _makeDiagnosis(ScanFailReason reasonIfNotFound) {
+    if (_resultsById.isNotEmpty) {
+      return ScanDiagnosis(
+        failReason: ScanFailReason.noneFound,
+        totalRawDevices: _rawSeenIds.length,
+        cuktechMatched: _resultsById.length,
+        fe95SeenButWrongPid: _fe95WrongPid,
+      );
+    }
+    final String msg;
+    if (_rawSeenIds.isEmpty) {
+      msg = '扫描过程中未收到任何 BLE 广播。\n'
+          '可能原因：\n  1) 附近 BLE 设备真的离线\n'
+          '  2) 蓝牙被系统级优化静默拦截（电池/手机管家）\n'
+          '  3) 请检查米家或系统蓝牙扫描界面是否能看到充电器。';
+    } else if (_fe95WrongPid > 0) {
+      msg = '搜到了 $_fe95WrongPid 台其他小米/米家设备，但没有 AD1204U '
+          '（酷态科10号 Ultra，product_id=0x660E）。\n'
+          '请确认充电器插电、屏幕亮着、且没有被其他手机蓝牙连接（米家独占）。';
+    } else {
+      msg = '共收到 ${_rawSeenIds.length} 台 BLE 设备广播，'
+          '但没有任何一条包含小米 FE95 广播数据。\n'
+          '（酷态科充电头必须以 0xFE95 Service Data 广播才能被识别）。\n'
+          '请检查充电器是否是 AD1204U 型号、是否未进入休眠。';
+    }
+    return ScanDiagnosis(
+      failReason: reasonIfNotFound,
+      totalRawDevices: _rawSeenIds.length,
+      cuktechMatched: 0,
+      fe95SeenButWrongPid: _fe95WrongPid,
+      message: msg,
+    );
   }
 }

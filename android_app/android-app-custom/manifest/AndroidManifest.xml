@@ -1,13 +1,37 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- ===== BLE ===== -->
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
+    <uses-feature android:name="android.hardware.bluetooth"     android:required="true" />
+
+    <!-- Internet & network state (米家云登录) -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Android 11 及以下：扫描 BLE 需要定位权限 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <uses-permission android:name="android.permission.BLUETOOTH" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
+
+    <!-- 经典蓝牙（旧 API 兼容） -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+        android:maxSdkVersion="30" />
+
+    <!-- Android 12 / API 31+：从"定位权限"拆分出独立的蓝牙运行时权限
+         BLUETOOTH_SCAN  必须，否则 ScanManager 静默返回 0 条
+         BLUETOOTH_CONNECT 必须，否则连不上任何 GATT -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+
+    <!-- Android 13+：启动前台服务 / 显示通知需 POST_NOTIFICATIONS -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Android 12+：前台服务类型（BLE 扫描） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"
+        tools:ignore="ProtectedPermissions" xmlns:tools="http://schemas.android.com/tools" />
 
     <application
         android:label="酷态科控制器"

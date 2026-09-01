@@ -11,6 +11,7 @@ dependencies:
   flutter:
     sdk: flutter
   flutter_blue_plus: ^1.32.0
+  permission_handler: ^11.3.0
   flutter_secure_storage: ^9.0.0
   shared_preferences: ^2.2.2
   pointycastle: ^3.0.0
