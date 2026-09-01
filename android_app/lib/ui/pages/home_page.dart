@@ -21,6 +21,7 @@ import 'package:cuktech_controller/protocol/authenticator.dart';
 import 'package:cuktech_controller/protocol/constants.dart';
 import 'package:cuktech_controller/protocol/port_control.dart';
 import 'package:cuktech_controller/protocol/token_service.dart';
+import 'package:cuktech_controller/protocol/models.dart';
 import 'package:cuktech_controller/protocol/settings.dart';
 import 'package:cuktech_controller/protocol/secure_token_store.dart';
 import 'package:cuktech_controller/utils/xiaomi_cloud/cloud_client.dart';
