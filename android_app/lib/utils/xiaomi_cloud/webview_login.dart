@@ -439,36 +439,34 @@ class XiaomiLoginController {
         return;
       }
 
-      // Step 8
-      var location = d7['location'] as String;
-      if (!location.startsWith('http')) {
-        location = 'https://account.xiaomi.com$location';
-      }
-      _emitDebug('═══════ Step 8: follow location ═══════');
-      _emitDebug('GET ${_truncate(location, 80)} (WITH redirect follow!)');
-      final r8 = await _getFollowRedirects(location);
-      _emitDebug('  ↳ final status=${r8.statusCode}');
-      _emitDebug('  ↳ FINAL cookies NOW: [${_sessionCookies.keys.join(",")}]');
-      if (_sessionCookies.containsKey('serviceToken')) {
-        _emitDebug('  ↳ serviceToken LEN=${_sessionCookies['serviceToken']!.length}');
-      }
-      if (_sessionCookies.containsKey('passToken')) {
-        _emitDebug('  ↳ passToken LEN=${_sessionCookies['passToken']!.length}');
-      }
+      // Step 8 — ⚠️ Python 参照项目全程不 clean cookies！保留完整 session
+        var location = d7['location'] as String;
+        if (!location.startsWith('http')) {
+          location = 'https://account.xiaomi.com$location';
+        }
+        _emitDebug('═══════ Step 8: follow location ═══════');
+        _emitDebug('GET ${_truncate(location, 80)} (WITH redirect follow!)');
+        final r8 = await _getFollowRedirects(location);
+        _emitDebug('  ↳ final status=${r8.statusCode}');
+        _emitDebug('  ↳ FINAL cookies NOW: [${_sessionCookies.keys.join(",")}]');
+        if (_sessionCookies.containsKey('serviceToken')) {
+          _emitDebug('  ↳ serviceToken LEN=${_sessionCookies['serviceToken']!.length}');
+        }
+        if (_sessionCookies.containsKey('passToken')) {
+          _emitDebug('  ↳ passToken LEN=${_sessionCookies['passToken']!.length}');
+        }
+        if (_sessionCookies.containsKey('identity_session')) {
+          _emitDebug('  ↳ identity_session LEN=${_sessionCookies['identity_session']!.length}');
+        }
 
-      // Step 8.5: CLEAN
-      _emitDebug('═══════ Step 8.5: CLEAN cookies ═══════');
-      _cleanForSsecurity();
-      _emitDebug('  ↳ AFTER CLEAN: [${_sessionCookies.keys.join(",")}]');
-
-      // Step 9 — ⚠️ 必须加回 userId cookie（clean 删掉了）
-      _emitDebug('═══════ Step 9: fresh serviceLogin ═══════');
-      _emitDebug('  (extraCookies: userId=$_username)');
-      final r9 = await _get(
-        'https://account.xiaomi.com/pass/serviceLogin',
-        params: {'sid': 'xiaomiio', '_json': 'true', 'cc': '+86'},
-        extraCookies: {'userId': _username},
-      );
+        // Step 9 — ⚠️ 不 CLEAN！用完整 session（和 Python requests.Session 一致）
+        _emitDebug('═══════ Step 9: fresh serviceLogin (FULL SESSION) ═══════');
+        _emitDebug('  cookies keys: [${_sessionCookies.keys.join(",")}]');
+        final r9 = await _get(
+          'https://account.xiaomi.com/pass/serviceLogin',
+          params: {'sid': 'xiaomiio', '_json': 'true'},
+          extraCookies: {'userId': _username},
+        );
       final d9 = _parseXiaomiJson(r9.body);
       final sign = d9['_sign'] as String;
       final nonce = d9['nonce'] as String? ?? '';
@@ -504,7 +502,6 @@ class XiaomiLoginController {
           'user': _username,
           '_sign': sign,
           '_json': 'true',
-          'cc': '+86',
         },
         extraCookies: {'userId': _username},
       );
