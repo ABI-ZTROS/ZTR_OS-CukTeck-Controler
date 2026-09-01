@@ -5,7 +5,9 @@
 // ═══════════════════════════════════════════════════════════════════════
 
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Interop;
+using CukTechController.Ble;
 using CukTechController.Protocol;
 using CukTechController.UI.Helpers;
 using CukTechController.ViewModels;
@@ -24,12 +26,9 @@ public partial class MainWindow : Window
         DataContext = new MainViewModel();
         _vm = (MainViewModel)DataContext;
 
-        // ═══ VisualPack 在 SourceInitialized 调用（Hwnd 刚创建，最佳时机）═══
-        // Loaded 事件中只做入场动画
         SourceInitialized += MainWindow_SourceInitialized;
         Loaded += MainWindow_Loaded;
 
-        // 订阅 ViewModel 事件
         _vm.OpenSettingsRequested += (_, _) =>
         {
             var view = new SettingsView { Owner = this };
@@ -44,8 +43,6 @@ public partial class MainWindow : Window
 
     private void MainWindow_SourceInitialized(object? sender, EventArgs e)
     {
-        // 应用 ColorOS VisualPack（Mica + 深色标题栏 + 小圆角）
-        // SourceInitialized = HwndSource 已创建，是调 DwmSetWindowAttribute 的最佳时机
         try
         {
             var hWnd = new WindowInteropHelper(this).EnsureHandle();
@@ -58,20 +55,31 @@ public partial class MainWindow : Window
         }
     }
 
-    private void MainWindow_Loaded(object sender, RoutedEventArgs e)
+    private async void MainWindow_Loaded(object sender, RoutedEventArgs e)
     {
-        // ColorOS 入场动画（淡入 + 从下方滑入）
-        // 注意：只动画 Window.Content（内部 Grid），不能动画 Window 本身
         AnimationHelper.PlayPageEntrance(this, durationMs: 400, slideDistance: 24);
+
+        // 自动连接：Settings.AutoConnect=true 且已有 Token 时，启动后台静默扫描+自动连第一个酷态科
+        try
+        {
+            if (Settings.Instance.AutoConnect)
+            {
+                bool hasToken = await TokenRepository.Instance.HasTokenAsync();
+                if (hasToken)
+                {
+                    Log.Information("[MAIN] AutoConnect enabled — background auto scan+connect");
+                    _ = Task.Run(() => _vm.AutoConnectAsync()); // 后台执行，不阻塞 UI
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Warning(ex, "[MAIN] AutoConnect failed (non-fatal)");
+        }
     }
 
-    private void CloudLogin_Click(object sender, RoutedEventArgs e)
-    {
-        MessageBox.Show("云登录功能已集成在设置中\n导入凭证按钮可直接导入 Android 导出的 .cuk 文件",
-            "云登录", MessageBoxButton.OK, MessageBoxImage.Information);
-    }
-
-    private void Import_Click(object sender, RoutedEventArgs e)
+    // 导入凭证 — 改为 async void（WPF Click 事件允许 async void）
+    private async void Import_Click(object sender, RoutedEventArgs e)
     {
         var dlg = new Microsoft.Win32.OpenFileDialog
         {
@@ -80,15 +88,23 @@ public partial class MainWindow : Window
         };
         if (dlg.ShowDialog() == true)
         {
-            var (ok, err) = TokenRepository.Instance.ImportCloudFromFileAsync(dlg.FileName).GetAwaiter().GetResult();
-            if (ok)
+            try
             {
-                MessageBox.Show("✅ 凭证导入成功！\n现在可以直接连接充电器了。",
-                    "导入成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                var (ok, err) = await TokenRepository.Instance.ImportCloudFromFileAsync(dlg.FileName);
+                if (ok)
+                {
+                    MessageBox.Show("✅ 凭证导入成功！\n现在可以点扫描+连接了。",
+                        "导入成功", MessageBoxButton.OK, MessageBoxImage.Information);
+                }
+                else
+                {
+                    MessageBox.Show($"❌ 导入失败: {err}", "错误",
+                        MessageBoxButton.OK, MessageBoxImage.Error);
+                }
             }
-            else
+            catch (Exception ex)
             {
-                MessageBox.Show($"❌ 导入失败: {err}", "错误",
+                MessageBox.Show($"❌ 导入异常: {ex.Message}", "错误",
                     MessageBoxButton.OK, MessageBoxImage.Error);
             }
         }
@@ -106,20 +122,65 @@ public partial class MainWindow : Window
         view.ShowDialog();
     }
 
-    private void AllOn_Click(object sender, RoutedEventArgs e)
+    // AllOn / AllOff — 调真实 PortControl，不再弹假 MessageBox
+    private async void AllOn_Click(object sender, RoutedEventArgs e)
     {
-        if (!_vm.IsConnected) return;
-        MessageBox.Show("全部开启命令已发送", "控制");
+        if (!_vm.IsConnected)
+        {
+            MessageBox.Show("请先连接充电器。", "未连接", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            var ok = await PortControl.Instance.SetPortAsync(
+                WindowsConnector.Instance, "all", on: true);
+            if (!ok) MessageBox.Show("❌ 全部开启失败，请查看日志。", "错误");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"❌ 异常: {ex.Message}", "错误");
+        }
     }
 
-    private void AllOff_Click(object sender, RoutedEventArgs e)
+    private async void AllOff_Click(object sender, RoutedEventArgs e)
     {
-        if (!_vm.IsConnected) return;
-        MessageBox.Show("全部关闭命令已发送", "控制");
+        if (!_vm.IsConnected)
+        {
+            MessageBox.Show("请先连接充电器。", "未连接", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
+        try
+        {
+            var ok = await PortControl.Instance.SetPortAsync(
+                WindowsConnector.Instance, "all", on: false);
+            if (!ok) MessageBox.Show("❌ 全部关闭失败，请查看日志。", "错误");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"❌ 异常: {ex.Message}", "错误");
+        }
     }
 
     private void Disconnect_Click(object sender, RoutedEventArgs e)
     {
-        _vm.DisconnectCommand.Execute(null);
+        // 优先走 DisconnectCommand (MVVM)，Click 只是备用
+        if (_vm.DisconnectCommand.CanExecute(null))
+            _vm.DisconnectCommand.Execute(null);
+    }
+
+    // 4 个端口卡片点击 → 打开单口控制窗口
+    private void PortCard_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is string tagStr &&
+            int.TryParse(tagStr, out int piid))
+        {
+            if (!_vm.IsConnected)
+            {
+                MessageBox.Show("请先连接充电器。", "未连接", MessageBoxButton.OK, MessageBoxImage.Warning);
+                return;
+            }
+            var view = new PortControlView(piid) { Owner = this };
+            view.ShowDialog();
+        }
     }
 }

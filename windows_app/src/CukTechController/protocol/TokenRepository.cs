@@ -46,8 +46,31 @@ namespace CukTechController.Protocol
                 "CukTechController",
                 "Secrets");
             Directory.CreateDirectory(configDir);
-            _tokenPath = Path.Combine(configDir, "token.enc");
-            _cloudPath = Path.Combine(configDir, "cloud_cred.enc");
+            // ⚠️ 文件名从 .enc 改为 .json：目前存储裸 JSON 文本，防止用户误以为加密了
+            // （Windows 端加 DPAPI 加密可作为后续独立改进项）
+            _tokenPath = Path.Combine(configDir, "token.json");
+            _cloudPath = Path.Combine(configDir, "cloud_cred.json");
+
+            // 兼容迁移：老用户的 .enc 文件如果存在就改名为 .json
+            MigrateLegacy(configDir, "token.enc", _tokenPath);
+            MigrateLegacy(configDir, "cloud_cred.enc", _cloudPath);
+        }
+
+        private static void MigrateLegacy(string dir, string legacyName, string newPath)
+        {
+            string old = Path.Combine(dir, legacyName);
+            try
+            {
+                if (File.Exists(old) && !File.Exists(newPath))
+                {
+                    File.Move(old, newPath);
+                    AppLogger.Info($"TokenRepository: migrated {legacyName} → {Path.GetFileName(newPath)}");
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error($"TokenRepository: migrate {legacyName} failed", ex);
+            }
         }
 
         // ============================================================

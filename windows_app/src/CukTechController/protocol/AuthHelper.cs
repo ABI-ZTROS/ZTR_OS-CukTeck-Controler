@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Cryptography;
@@ -10,46 +11,68 @@ namespace CukTechController.Protocol;
 
 /// <summary>
 /// 认证流程辅助方法
+///
+/// ⚠️ 并发安全重写（2026-09）：
+/// 老版本直接订阅 ValueReceived → 多线程同通道会出现竞态（A 的响应被 B 偷走）
+/// 且"等待请求先到、通知后到"的老通知全部丢。
+///
+/// 新设计：每个通道建立一个无限大小的 ConcurrentQueue 作为缓冲，
+/// 用 Lazy+lock 保证第一次调用时注册全局侦听；之后每个 WaitNotifyAsync
+/// 从 queue 取数据（有就直接拿，没有就 SemaphoreSlim 等待下一条到）。
 /// </summary>
 internal static class AuthHelper
 {
+    private static readonly object _initLock = new();
+    private static WindowsConnector? _registeredConnector;
+
+    // 通道 → 数据缓冲队列
+    private static readonly ConcurrentDictionary<string, ConcurrentQueue<byte[]>> _channelQueues = new();
+    // 通道 → 有新数据到达时的唤醒信号
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> _channelSignals = new();
+
+    /// <summary>确保全局事件监听已注册（懒加载）</summary>
+    private static void EnsurePipelines(WindowsConnector connector)
+    {
+        if (ReferenceEquals(_registeredConnector, connector)) return;
+        lock (_initLock)
+        {
+            if (ReferenceEquals(_registeredConnector, connector)) return;
+            connector.ValueReceived -= DispatchNotification; // 防御：避免重复挂
+            connector.ValueReceived += DispatchNotification;
+            _registeredConnector = connector;
+        }
+    }
+
+    private static void DispatchNotification(object? sender, (string Channel, byte[] Data) e)
+    {
+        var q = _channelQueues.GetOrAdd(e.Channel, _ => new ConcurrentQueue<byte[]>());
+        q.Enqueue(e.Data);
+        var signal = _channelSignals.GetOrAdd(e.Channel, _ => new SemaphoreSlim(0, int.MaxValue));
+        signal.Release();
+    }
+
     internal static async Task<byte[]?> WaitNotifyAsync(
         WindowsConnector connector,
         string channel,
         int timeoutSec = 3)
     {
-        // 使用 TaskCompletionSource 订阅事件
-        var tcs = new TaskCompletionSource<byte[]>();
-        CancellationTokenSource? cts = null;
+        EnsurePipelines(connector);
 
-        void Handler(object? sender, (string Channel, byte[] Data) e)
-        {
-            if (e.Channel == channel && !tcs.Task.IsCompleted)
-            {
-                tcs.TrySetResult(e.Data);
-            }
-        }
+        var q = _channelQueues.GetOrAdd(channel, _ => new ConcurrentQueue<byte[]>());
+        var signal = _channelSignals.GetOrAdd(channel, _ => new SemaphoreSlim(0, int.MaxValue));
 
-        connector.ValueReceived += Handler;
-        try
-        {
-            cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
-            cts.Token.Register(() =>
-            {
-                if (!tcs.Task.IsCompleted)
-                    tcs.TrySetResult(Array.Empty<byte>()); // 空数组表示超时
-            });
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(timeoutSec));
 
-            var result = await tcs.Task;
-            // 超时返回空数组
-            if (result.Length == 0) return null;
-            return result;
-        }
-        finally
+        while (!cts.IsCancellationRequested)
         {
-            connector.ValueReceived -= Handler;
-            cts?.Dispose();
+            // 先看缓冲里有没有老通知（在我们开始等之前到的）
+            if (q.TryDequeue(out var buffered))
+                return buffered;
+
+            try { await signal.WaitAsync(cts.Token); }
+            catch (OperationCanceledException) { return null; } // timeout
         }
+        return null;
     }
 
     internal static async Task<byte[]?> RecvAuthResponseAsync(

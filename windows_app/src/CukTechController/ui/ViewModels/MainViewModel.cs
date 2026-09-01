@@ -1,13 +1,11 @@
 // ═══════════════════════════════════════════════════════════════════════
 // 🧠 MainViewModel + PortStateViewModel
-//   CommunityToolkit.Mvvm 源生成器驱动（MSMC 同款架构）
-//   [ObservableProperty] → 自动生成 INotifyPropertyChanged 属性
-//   [RelayCommand]       → 自动生成 ICommand
 // ═══════════════════════════════════════════════════════════════════════
 
 using System;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -27,6 +25,11 @@ public partial class MainViewModel : ObservableObject
     private readonly WindowsScanner _scanner = WindowsScanner.Instance;
     private readonly WindowsConnector _connector = WindowsConnector.Instance;
     private readonly TokenRepository _tokenRepo = TokenRepository.Instance;
+    private readonly PortControl _portCtrl = PortControl.Instance;
+    private readonly SettingsService _settingsSvc = SettingsService.Instance;
+
+    private PeriodicTimer? _refreshTimer;
+    private CancellationTokenSource? _refreshCts;
 
     // ─── 源生成属性 ───
 
@@ -90,8 +93,11 @@ public partial class MainViewModel : ObservableObject
     {
         if (e.Piid >= 1 && e.Piid <= 4 && e.Piid <= Ports.Count)
         {
+            if (e.Active) ActivePorts.Add(e.Piid); else ActivePorts.Remove(e.Piid);
             Ports[e.Piid - 1].Update(e);
             OnPropertyChanged(nameof(TotalPower));
+            OnPropertyChanged(nameof(ActivePortCount));
+            OnPropertyChanged(nameof(ActivePorts));
             OnPropertyChanged(nameof(C1PortText));
             OnPropertyChanged(nameof(C2PortText));
             OnPropertyChanged(nameof(C3PortText));
@@ -99,7 +105,7 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    // ─── [RelayCommand] 自动生成 ScanCommand ───
+    // ─── Scan ───
 
     private bool CanScan => !IsScanning && !IsConnecting;
 
@@ -111,19 +117,21 @@ public partial class MainViewModel : ObservableObject
         StatusMessage = "扫描中...";
         try
         {
-            var results = await _scanner.StartAsync(timeout: TimeSpan.FromSeconds(10));
+            var results = await _scanner.StartAsync(
+                timeout: TimeSpan.FromSeconds(Math.Max(3, Settings.Instance.ScanTimeout)));
             ScanResults = new ObservableCollection<ScanResult>(results);
             IsScanning = false;
 
             var cuk = results.FirstOrDefault(r => r.IsCuktech);
             if (cuk == null)
             {
-                ErrorMessage = "未扫描到酷态科设备";
+                ErrorMessage = "未扫描到酷态科 AD1204U 设备（请确认充电器附近蓝牙广播可用）";
                 StatusMessage = "未连接";
             }
             else
             {
-                StatusMessage = $"扫描到 {results.Count} 个设备";
+                StatusMessage = $"扫描到 {results.Count} 个设备，酷态科: {results.Count(r => r.IsCuktech)}";
+                SelectedScanResult ??= cuk;
             }
         }
         catch (Exception ex)
@@ -131,11 +139,11 @@ public partial class MainViewModel : ObservableObject
             IsScanning = false;
             ErrorMessage = $"扫描失败: {ex.Message}";
             StatusMessage = "错误";
-            Serilog.Log.Error(ex, "Scan failed");
+            Log.Error(ex, "Scan failed");
         }
     }
 
-    // ─── [RelayCommand] 自动生成 ConnectCommand ───
+    // ─── Connect + Auth + WireUp + Init + Timer ───
 
     private bool CanConnect => !IsConnecting && SelectedScanResult != null;
 
@@ -145,10 +153,10 @@ public partial class MainViewModel : ObservableObject
         if (SelectedScanResult == null) return;
         IsConnecting = true;
         ErrorMessage = string.Empty;
-        StatusMessage = $"连接到 {SelectedScanResult.Name}...";
+        StatusMessage = $"连接到 {SelectedScanResult.Name ?? "(匿名设备)"}...";
         try
         {
-            var ok = await _connector.ConnectAsync(ParseAddress(SelectedScanResult.DeviceId));
+            var ok = await _connector.ConnectAsync(SelectedScanResult.BluetoothAddress);
             if (!ok) { FailConnect(); return; }
 
             StatusMessage = "认证中...";
@@ -156,7 +164,8 @@ public partial class MainViewModel : ObservableObject
             if (tokenCfg == null || string.IsNullOrEmpty(tokenCfg.Token))
             {
                 IsConnecting = false; IsConnected = false;
-                StatusMessage = "未连接"; ErrorMessage = "未配置 Token";
+                StatusMessage = "未连接";
+                ErrorMessage = "未配置 Token：请点「导入凭证」先导入 Android 导出的 .cuk 文件";
                 await _connector.DisconnectAsync();
                 return;
             }
@@ -165,55 +174,154 @@ public partial class MainViewModel : ObservableObject
             if (!authed)
             {
                 IsConnecting = false; IsConnected = false;
-                StatusMessage = "认证失败"; ErrorMessage = "认证失败：Token 无效或设备无响应";
+                StatusMessage = "认证失败";
+                ErrorMessage = "认证失败：Token 无效或设备无响应";
                 await _connector.DisconnectAsync();
                 return;
             }
 
-            IsConnecting = false; IsConnected = true;
             PortDecoderWiring.WireUp(_connector);
+            IsConnecting = false; IsConnected = true;
+            StatusMessage = "同步设备状态...";
+
+            // ✅ 初始状态同步：GET 1-4 端口 + 5 场景 6 息屏 7 协议 16 端口掩码 19 息屏空闲 20 屏幕锁 21 协议开关
+            await SnapshotAllAsync();
+
+            // ✅ 启动周期轮询定时器（Settings.RefreshInterval 毫秒 → 最小 1s）
+            StartRefreshLoop();
+
             StatusMessage = "已连接";
-            Serilog.Log.Information("Connected to {Device}", SelectedScanResult.Name);
+            Log.Information("Connected to {Device} (addr={Addr})",
+                SelectedScanResult.Name, SelectedScanResult.DeviceId);
         }
         catch (Exception ex)
         {
             FailConnect();
-            Serilog.Log.Error(ex, "Connect exception");
+            Log.Error(ex, "Connect exception");
         }
+    }
+
+    /// <summary>AutoConnect：后台静默扫到第一个酷态科就自动连上</summary>
+    public async Task AutoConnectAsync()
+    {
+        if (IsConnected || IsConnecting || IsScanning) return;
+        var results = await _scanner.StartAsync(
+            timeout: TimeSpan.FromSeconds(10), filterCuktech: true);
+        var first = results.FirstOrDefault(r => r.IsCuktech);
+        if (first == null)
+        {
+            Log.Information("AutoConnect: no device found");
+            return;
+        }
+        SelectedScanResult = first;
+        if (ConnectCommand.CanExecute(null))
+            await ConnectCommand.ExecuteAsync(null!);
+    }
+
+    private async Task SnapshotAllAsync()
+    {
+        // 端口状态：GET PIID 1-4 让 PortDecoder 解码分发
+        for (int piid = 1; piid <= 4; piid++)
+        {
+            try
+            {
+                var resp = await EncryptedChannel.Instance.SendGetAsync(
+                    _connector, ProtocolConstants.SiidCharger, piid, seq: 0xF0 + piid);
+                if (resp != null)
+                    PortDecoder.DispatchFromTlvMap(resp);
+            }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Initial Snapshot GET piid={Piid} failed", piid);
+            }
+        }
+        // 设置项：顺便拉一次 5/6/8/16/19/20/21（SettingsView 打开后会自己读）
+        try
+        {
+            await _settingsSvc.GetGlobalTimerAsync(_connector);
+            await _portCtrl.ReadStateAsync(_connector);
+        }
+        catch { /* noop */ }
+    }
+
+    private void StartRefreshLoop()
+    {
+        StopRefreshLoop();
+        int intervalMs = Math.Clamp(Settings.Instance.RefreshInterval, 1000, 30000);
+        var per = TimeSpan.FromMilliseconds(intervalMs);
+        _refreshTimer = new PeriodicTimer(per);
+        _refreshCts = new CancellationTokenSource();
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                while (await _refreshTimer.WaitForNextTickAsync(_refreshCts.Token))
+                {
+                    try
+                    {
+                        if (!IsConnected) break;
+                        for (int piid = 1; piid <= 4; piid++)
+                        {
+                            var resp = await EncryptedChannel.Instance.SendGetAsync(
+                                _connector, ProtocolConstants.SiidCharger, piid,
+                                seq: (int)(0xE000 + (piid)) & 0xFF);
+                            if (resp != null)
+                                PortDecoder.DispatchFromTlvMap(resp);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning(ex, "Periodic refresh tick failed");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* expected */ }
+            catch (Exception ex)
+            {
+                Log.Error(ex, "Refresh loop crashed");
+            }
+        });
+    }
+
+    private void StopRefreshLoop()
+    {
+        try { _refreshCts?.Cancel(); } catch { }
+        try { _refreshTimer?.Dispose(); } catch { }
+        _refreshTimer = null; _refreshCts = null;
     }
 
     private void FailConnect()
     {
         IsConnecting = false; IsConnected = false;
-        StatusMessage = "连接失败"; ErrorMessage = "连接失败";
+        StatusMessage = "连接失败"; ErrorMessage = "连接或认证失败（请查看日志）";
+        StopRefreshLoop();
     }
 
-    // ─── [RelayCommand] 自动生成 DisconnectCommand ───
+    // ─── Disconnect ───
 
     private bool CanDisconnect => IsConnected;
 
     [RelayCommand(CanExecute = nameof(CanDisconnect))]
     private async Task DisconnectAsync()
     {
+        StopRefreshLoop();
         PortDecoderWiring.TearDown(_connector);
         try { await _connector.DisconnectAsync(); }
-        catch (Exception ex) { Serilog.Log.Warning(ex, "Disconnect error"); }
+        catch (Exception ex) { Log.Warning(ex, "Disconnect error"); }
         IsConnected = false;
         StatusMessage = "未连接";
         ErrorMessage = string.Empty;
         foreach (var p in Ports) p.Update(null);
+        ActivePorts.Clear();
+        OnPropertyChanged(nameof(ActivePortCount));
+        OnPropertyChanged(nameof(TotalPower));
     }
 
-    // ─── 事件触发命令（WPF 绑定直接用 Event→Command 桥接也可）───
+    // ─── 事件触发命令 ───
 
     public void RaiseOpenSettings() => OpenSettingsRequested?.Invoke(this, EventArgs.Empty);
     public void RaiseOpenLog() => OpenLogRequested?.Invoke(this, EventArgs.Empty);
-
-    private static ulong ParseAddress(string id)
-    {
-        var clean = id.Replace(":", "").Replace("-", "").Replace(" ", "");
-        return ulong.TryParse(clean, System.Globalization.NumberStyles.HexNumber, null, out var val) ? val : 0;
-    }
 }
 
 // ────────────────────────────────────────────────────────────────────────

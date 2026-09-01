@@ -2,14 +2,18 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net8.0-windows10.0.22000.0</TargetFramework>
+    <TargetFramework>net10.0-windows10.0.22000.0</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <!-- CI/Linux 下只做语义编译验证，不生成 WPF 可执行文件（Linux 没有 WPF runtime pack）。
+         Windows 上正常 dotnet build/publish 会忽略这行（因为 RID=win-x64）。 -->
+    <RuntimeIdentifier Condition="$([MSBuild]::IsOSPlatform('Linux'))">win-x64</RuntimeIdentifier>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <ApplicationIcon />
     <AssemblyName>CukTechController</AssemblyName>
     <RootNamespace>CukTechController</RootNamespace>
-    <Version>0.2.0</Version>
+    <Version>0.3.0</Version>
     <!-- WPF 不支持 NativeAOT; 发布使用 dotnet publish 加 self-contained -->
     <PublishSingleFile>true</PublishSingleFile>
     <SelfContained>true</SelfContained>
@@ -25,21 +29,21 @@
     <!-- 🧩 MVVM 基础设施（MSMC 同款）-->
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.*" />
 
-    <!-- 🎨 UI 主题（Material Design 深色科技感）-->
-    <PackageReference Include="MaterialDesignThemes" Version="5.*" />
-
     <!-- 📦 依赖注入 -->
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.*" />
 
     <!-- 📝 结构化日志 -->
     <PackageReference Include="Serilog" Version="4.*" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.*" />
-    <PackageReference Include="Serilog.Extensions.Logging" Version="8.*" />
 
-    <!-- 🌐 现有依赖 -->
+    <!-- 🔒 MiOT AES-CCM (tag_length=4) 加解密：AesGcm 不支持 4-byte tag，改用 BouncyCastle -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
+
+    <!-- 🌐 WebView2 用于云端扫码登录（米家 oauth 登录页） -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.*" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
-    <PackageReference Include="OxyPlot.Wpf" Version="2.2.0" />
+
+    <!-- 🌙 XiaomiCloudClient 使用 Newtonsoft.Json（兼容原移植代码格式 -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.*" />
   </ItemGroup>
 
 </Project>

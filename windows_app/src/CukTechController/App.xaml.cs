@@ -58,15 +58,21 @@ public partial class App : Application
             Log.Information("[BOOT] AppLogger configured");
             Log.Information("[BOOT] DI ready");
 
-            // ─── 3. 加载设置 ───
+            // ─── 3. 加载设置（异步预加载：WPF 同步 OnStartup 上不能阻塞，避免潜在死锁）───
             try
             {
-                Settings.Instance.LoadAsync().GetAwaiter().GetResult();
-                Log.Information("[BOOT] Settings loaded");
+                _ = Settings.Instance.LoadAsync()
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                            Log.Warning(t.Exception, "[BOOT] Settings load failed (using defaults)");
+                        else
+                            Log.Information("[BOOT] Settings loaded");
+                    }, TaskScheduler.Default);
             }
             catch (Exception ex)
             {
-                Log.Warning(ex, "[BOOT] Settings load failed (using defaults)");
+                Log.Warning(ex, "[BOOT] Settings load faulted (using defaults)");
             }
 
             // ─── 4. 手动 Show 主窗口（MSMC 模式）───

@@ -9,23 +9,49 @@
         UseLayoutRounding="True"
         TextOptions.TextFormattingMode="Display">
 
+    <Window.Resources>
+        <Style TargetType="ListBoxItem" x:Key="ScanResultItemStyle">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}"/>
+            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+        </Style>
+    </Window.Resources>
+
     <!-- 主容器：不透明深色主题，叠加在 Mica 效果之上 -->
     <Grid Background="{StaticResource BackgroundBrush}">
-        <!-- ===== 顶部状态栏 ===== -->
         <Grid.RowDefinitions>
             <RowDefinition Height="56"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
+        <!-- ===== 顶部状态栏 ===== -->
         <Border Grid.Row="0"
                 Background="{StaticResource SurfaceBrush}"
                 BorderBrush="#1AFFFFFF" BorderThickness="0,0,0,1">
             <Grid Margin="16,0">
-                <!-- 左：Logo + 标题 -->
+                <!-- 左：Logo + 连接指示灯 -->
                 <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                     <Ellipse Width="10" Height="10" Margin="0,0,8,0"
-                             Fill="{StaticResource ConnectedBrush}"/>
+                             x:Name="ConnIndicator">
+                        <Ellipse.Style>
+                            <Style TargetType="Ellipse">
+                                <Setter Property="Fill" Value="{StaticResource DisconnectedBrush}"/>
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsConnected}" Value="True">
+                                        <Setter Property="Fill" Value="{StaticResource ConnectedBrush}"/>
+                                    </DataTrigger>
+                                    <DataTrigger Binding="{Binding IsScanning}" Value="True">
+                                        <Setter Property="Fill" Value="{StaticResource AccentBlueBrush}"/>
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Ellipse.Style>
+                    </Ellipse>
                     <TextBlock Text="酷态科 CukTech" FontSize="16" FontWeight="Bold"
                                Foreground="{StaticResource TextPrimaryBrush}"/>
                 </StackPanel>
@@ -42,10 +68,13 @@
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
                     <Button Content="🔄 扫描" Command="{Binding ScanCommand}"
                             Style="{StaticResource ColorOSButton}" Margin="4,0"/>
-                    <Button Content="🔗 云登录" Click="CloudLogin_Click"
-                            Style="{StaticResource ColorOSButton}" Margin="4,0"/>
-                    <Button Content="📥 导入凭证" Click="Import_Click"
-                            Style="{StaticResource ColorOSButton}" Margin="4,0"/>
+                    <Button Content="🔗 连接" Command="{Binding ConnectCommand}"
+                            Style="{StaticResource ColorOSButton}"
+                            Background="{StaticResource AccentGreenBrush}"
+                            Margin="4,0"/>
+                    <Button Content="🔐 导入凭证" Click="Import_Click"
+                            Style="{StaticResource ColorOSButton}" Margin="4,0"
+                            Background="{StaticResource AccentPurpleBrush}"/>
                     <Button Content="⚙️" Click="Settings_Click"
                             Style="{StaticResource ColorOSButton}" Margin="4,0" Padding="12,8"/>
                     <Button Content="📋" Click="Log_Click"
@@ -54,11 +83,79 @@
             </Grid>
         </Border>
 
+        <!-- ===== 错误提示条 ===== -->
+        <Border Grid.Row="0" Panel.ZIndex="1"
+                Background="#80EF4444" CornerRadius="4"
+                HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                Margin="0,0,0,-26" Padding="12,4"
+                Visibility="{Binding ErrorMessage, Converter={StaticResource StringToVis}}">
+            <TextBlock Text="{Binding ErrorMessage}" Foreground="White" FontSize="12"/>
+        </Border>
+
         <!-- ===== 中心辐射区 ===== -->
         <Grid Grid.Row="1">
+            <!-- ===== 左侧：扫描结果列表 ===== -->
+            <Border HorizontalAlignment="Left" VerticalAlignment="Top"
+                    Margin="16,16,0,0" Width="240" MaxHeight="280"
+                    Background="{StaticResource SurfaceBrush}" CornerRadius="12"
+                    BorderBrush="#1AFFFFFF" BorderThickness="1">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="32"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="12,0">
+                        <TextBlock Text="🔎 设备列表" FontSize="12" FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   VerticalAlignment="Center"/>
+                    </Grid>
+                    <ListBox Grid.Row="1"
+                             x:Name="ScanListBox"
+                             ItemsSource="{Binding ScanResults}"
+                             SelectedItem="{Binding SelectedScanResult}"
+                             ItemContainerStyle="{StaticResource ScanResultItemStyle}"
+                             BorderThickness="0"
+                             Background="Transparent"
+                             ScrollViewer.VerticalScrollBarVisibility="Auto">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Width="8" Height="8" VerticalAlignment="Center"
+                                             Margin="0,0,10,0">
+                                        <Ellipse.Style>
+                                            <Style TargetType="Ellipse">
+                                                <Setter Property="Fill" Value="{StaticResource DisconnectedBrush}"/>
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsCuktech}" Value="True">
+                                                        <Setter Property="Fill" Value="{StaticResource ConnectedBrush}"/>
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Ellipse.Style>
+                                    </Ellipse>
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock FontSize="12" FontWeight="SemiBold"
+                                                   Foreground="{StaticResource TextPrimaryBrush}">
+                                            <Run Text="{Binding Name, TargetNullValue='(无名设备)', FallbackValue='(无名设备)'}"/>
+                                            <Run Text="  · RSSI "/><Run Text="{Binding Rssi}"/>
+                                        </TextBlock>
+                                        <TextBlock FontSize="10"
+                                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                                   Text="{Binding DeviceId}"/>
+                                    </StackPanel>
+                                </Grid>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
             <!-- 背景装饰：辐射光线 -->
             <Canvas>
-                <!-- 4 条从中心辐射到端口的淡光线 -->
                 <Line X1="510" Y1="200" X2="330" Y2="100"
                       Stroke="#14FFFFFF" StrokeThickness="1"/>
                 <Line X1="510" Y1="200" X2="690" Y2="100"
@@ -74,21 +171,18 @@
                 <Grid.RenderTransform>
                     <TranslateTransform X="0" Y="-20"/>
                 </Grid.RenderTransform>
-
-                <!-- 功率环（最外层）-->
                 <c:PowerRingControl Width="280" Height="280"
                                     TotalPower="{Binding TotalPower}"
                                     ActiveCount="{Binding ActivePortCount}"/>
-
-                <!-- 充电头 SVG -->
                 <c:ChargerVisualControl Width="220" Height="220"
                                          ActivePorts="{Binding ActivePorts}"/>
             </Grid>
 
             <!-- ===== 4 端口快捷按钮（环形分布）===== -->
-            <!-- C1 左上 (-135°) -->
             <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Width="90" Height="90" Margin="0,0,0,0">
+                    Width="90" Height="90"
+                    Tag="1"
+                    MouseLeftButtonDown="PortCard_MouseLeftButtonDown">
                 <Border.RenderTransform>
                     <TransformGroup>
                         <TranslateTransform X="-240" Y="-140"/>
@@ -104,9 +198,10 @@
                 </Border>
             </Border>
 
-            <!-- C2 右上 (-45°) -->
             <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Width="90" Height="90">
+                    Width="90" Height="90"
+                    Tag="2"
+                    MouseLeftButtonDown="PortCard_MouseLeftButtonDown">
                 <Border.RenderTransform>
                     <TransformGroup>
                         <TranslateTransform X="240" Y="-140"/>
@@ -122,9 +217,10 @@
                 </Border>
             </Border>
 
-            <!-- C3 右下 (45°) -->
             <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Width="90" Height="90">
+                    Width="90" Height="90"
+                    Tag="3"
+                    MouseLeftButtonDown="PortCard_MouseLeftButtonDown">
                 <Border.RenderTransform>
                     <TransformGroup>
                         <TranslateTransform X="240" Y="140"/>
@@ -140,9 +236,10 @@
                 </Border>
             </Border>
 
-            <!-- A 口 左下 (135°) -->
             <Border HorizontalAlignment="Center" VerticalAlignment="Center"
-                    Width="90" Height="90">
+                    Width="90" Height="90"
+                    Tag="4"
+                    MouseLeftButtonDown="PortCard_MouseLeftButtonDown">
                 <Border.RenderTransform>
                     <TransformGroup>
                         <TranslateTransform X="-240" Y="140"/>
@@ -160,17 +257,32 @@
         </Grid>
 
         <!-- ===== 底部快捷操作 ===== -->
-        <Border Grid.Row="2" Margin="16,0">
+        <Border Grid.Row="2" Margin="16,4">
             <Grid>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
                     <Button Content="⚡ 全部开启" Click="AllOn_Click"
-                            Style="{StaticResource ColorOSButton}" Margin="8"/>
+                            Style="{StaticResource ColorOSButton}"
+                            Background="{StaticResource AccentGreenBrush}"
+                            Margin="8"/>
                     <Button Content="⏻ 全部关闭" Click="AllOff_Click"
+                            Style="{StaticResource ColorOSButton}"
+                            Background="{StaticResource WarningBrush}"
                             Margin="8" Padding="16,8"/>
                     <Button Content="🔌 断开" Click="Disconnect_Click"
+                            Command="{Binding DisconnectCommand}"
+                            Style="{StaticResource ColorOSButton}"
+                            Background="{StaticResource ErrorBrush}"
                             Margin="8" Padding="16,8"/>
                 </StackPanel>
             </Grid>
+        </Border>
+
+        <!-- ===== 最底部错误/提示文本 ===== -->
+        <Border Grid.Row="3" Margin="16,0,16,12"
+                Visibility="{Binding ErrorMessage, Converter={StaticResource StringToVis}}">
+            <TextBlock Text="{Binding ErrorMessage}"
+                       Foreground="{StaticResource ErrorBrush}" FontSize="11"
+                       TextAlignment="Center" TextWrapping="Wrap"/>
         </Border>
     </Grid>
 </Window>

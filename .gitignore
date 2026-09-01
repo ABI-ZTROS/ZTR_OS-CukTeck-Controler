@@ -33,3 +33,14 @@ secrets/
 *.key
 keystore.properties
 release_apk/
+# .NET / Visual Studio / MSBuild
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+packages/
+TestResults/
+*.log

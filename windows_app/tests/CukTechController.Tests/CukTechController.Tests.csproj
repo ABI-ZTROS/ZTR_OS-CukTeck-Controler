@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <RootNamespace>CukTechController.Tests</RootNamespace>
+    <LangVersion>latest</LangVersion>
+    <DefineConstants>$(DefineConstants);TESTING</DefineConstants>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- BouncyCastle for real AES-CCM reference in tests -->
+    <PackageReference Include="BouncyCastle.Cryptography" Version="2.7.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <!-- Pure-logic sources only (no BLE/WinRT/WPF types) -->
+  <ItemGroup>
+    <Compile Include="..\..\src\CukTechController\protocol\ProtocolConstants.cs" />
+    <Compile Include="..\..\src\CukTechController\protocol\MiotTlv.cs" />
+    <Compile Include="..\..\src\CukTechController\protocol\Crypto.cs" />
+    <Compile Include="..\..\src\CukTechController\protocol\Models.cs" />
+    <Compile Include="..\..\src\CukTechController\utils\Logger.cs" />
+    <Compile Include="..\..\src\CukTechController\ble\PortStream.cs" />
+  </ItemGroup>
+
+
+
+</Project>
