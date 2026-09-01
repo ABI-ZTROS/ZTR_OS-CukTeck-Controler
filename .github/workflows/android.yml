@@ -48,13 +48,13 @@ jobs:
 
           # 登记期望的 release SHA-256 指纹，后续 APK 校验必须严格一致
           # 注意：Oracle keytool 输出「SHA256:」，OpenJDK keytool 有时输出「SHA-256:」，必须两种都兼容。
+          # grep -m1 代替 grep | head -1：在 set -euo pipefail 下避免 SIGPIPE 退出码 141 触发炸机
           EXPECTED_SHA256="$(keytool -list -keystore .github/upload-keystore.jks \
                                      -storepass cuktech123 \
                                      -alias dev.cloud.ztr_os -v 2>/dev/null \
                         | grep -E "Certificate fingerprints|SHA-?256" \
-                        | grep -oE "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
-                        | head -1 \
-                        | sed -E 's/^SHA-?256:[[:space:]]*//')"
+                        | grep -m1 -oE "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                        | sed -E 's/^SHA-?256:[[:space:]]*//' || true)"
           if [ -z "$EXPECTED_SHA256" ]; then
               echo "❌ 无法提取 SHA-256 指纹，后续 APK 校验无法继续"
               echo "   debug 输出 keytool -v："
@@ -196,22 +196,41 @@ jobs:
                 RC=$?
                 set -e
                 echo "   [method 1] apksigner verify rc=$RC"
-                if [ "$RC" -eq 0 ]; then
-                  # apksigner 格式: "Signer #1 certificate SHA-256 digest: XX:XX:..." 或
-                  #                "WARNING: ... verified using v1 scheme only" + SHA-256 digest
-                  APK_SHA="$(grep -oEi "SHA-?256[[:space:]-]*digest:[[:space:]]*[0-9a-fA-F:]{95,}" "$SIG_OUT" \
-                            | head -1 | sed -E 's/SHA-?256[[:space:]-]*digest:[[:space:]]*//I')"
-                  SIGNER_NAME="$(grep -Ei "Signer #[0-9]+ certificate (DN|subject|Issuer|Owner):" "$SIG_OUT" | head -2 || true)"
-                  if [ -z "$APK_SHA" ]; then
-                    # 某些版本会写成 "Cert SHA-256: ..."
-                    APK_SHA="$(grep -oEi "Cert[[:space:]-]*SHA-?256:[[:space:]]*[0-9a-fA-F:]{95,}" "$SIG_OUT" \
-                              | head -1 | sed -E 's/.*SHA-?256:[[:space:]]*//I')"
-                  fi
-                  APK_SIGNER_INFO="${SIGNER_NAME}${NL:-$(printf '\n')}(apksigner)"
+                echo "   [method 1] apksigner 完整输出（逐行，便于修正则）："
+                cat -n "$SIG_OUT" 2>/dev/null || true
+                # 先以宽松格式从输出取 SHA-256。
+                #   Android build-tools 37 / 34 常见格式：
+                #     Signer #1 certificate SHA-256 digest: AA:BB:CC:...
+                #     Signer #1 certificate SHA256 digest: AA:BB:CC:...
+                #     Signer #1 Cert SHA-256: AA:BB:CC:...
+                # 注意：外面是 set -euo pipefail，绝对不能出现「producer | head -1」
+                # 否则 head 读完就关读端，producer 被 SIGPIPE 杀掉，退出码 141 触发 pipefail→errexit。
+                # awk 内部已自带「找到即 print + exit」，最多输出一行，不允许再管道接 head。
+                APK_SHA="$(
+                  awk '{
+                    line=tolower($0)
+                    idx=index(line, "sha-256"); if (idx==0) idx=index(line, "sha256")
+                    if (idx==0) next
+                    rest=substr(line, idx)
+                    n=split(rest, arr, /[:[:space:]]+/)
+                    for (s=1;s<=n;s++) {
+                      cand=""
+                      for (e=s;e<=s+31 && e<=n;e++) {
+                        v=arr[e]
+                        if (v !~ /^[0-9a-f][0-9a-f]$/) break
+                        cand = cand (cand=="" ? "" : ":") v
+                      }
+                      if (e-s==32) { print cand; exit }
+                    }
+                  }' "$SIG_OUT"
+                )"
+                if [ -z "$APK_SHA" ]; then
+                  # grep -m1：匹配到 1 行就停止，等价于 grep | head -1 但无管道无 SIGPIPE 风险
+                  APK_SHA="$(grep -m1 -oE "[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){30,}" "$SIG_OUT" || true)"
                 fi
-                echo "   [method 1] output tail:"
-                tail -15 "$SIG_OUT" 2>/dev/null || true
-                rm -f "$SIG_OUT"
+                SIGNER_NAME="$(grep -Ei "Signer #[0-9]+|certificate|subject|Owner|Issuer|DN:" "$SIG_OUT" | head -8 || true)"
+                APK_SIGNER_INFO="${SIGNER_NAME}"
+                echo "   [method 1] APK_SHA extracted='${APK_SHA:-<empty>}'"
               fi
             fi
 
@@ -238,10 +257,11 @@ jobs:
                   set -e
                   if [ "$RC" -eq 0 ] && [ -n "$KT_OUT" ]; then
                     echo "   [method 2a] keytool -printcert Subject line:"
-                    echo "$KT_OUT" | grep -E "^(Owner|Issuer|SHA-?256):" | head -5
+                    echo "$KT_OUT" | grep -E "^(Owner|Issuer|SHA-?256):" | head -5 || true
+                    # grep -m1：内置「第一匹配即停」，避免 grep | head 管道 SIGPIPE 在 pipefail 下炸
                     APK_SHA="$(echo "$KT_OUT" \
-                              | grep -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
-                              | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//I')"
+                              | grep -m1 -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                              | sed -E 's/^SHA-?256:[[:space:]]*//I' || true)"
                     APK_SIGNER_INFO="$(echo "$KT_OUT" | grep -E "^(Owner|Issuer):" | head -2 || true)"
                   fi
 
@@ -270,8 +290,8 @@ jobs:
                     set -e
                     if [ "$RC" -eq 0 ] && [ -n "$KT2_OUT" ]; then
                       APK_SHA="$(echo "$KT2_OUT" \
-                                | grep -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
-                                | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//I')"
+                                | grep -m1 -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                                | sed -E 's/^SHA-?256:[[:space:]]*//I' || true)"
                       APK_SIGNER_INFO="$(echo "$KT2_OUT" | grep -E "^(Owner|Issuer):" | head -2 || true)"
                     fi
                   fi
@@ -289,9 +309,9 @@ jobs:
               set -e
               if [ "$RC" -eq 0 ] || [ -n "$JS_OUT" ]; then
                 APK_SHA="$(echo "$JS_OUT" \
-                          | grep -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
-                          | head -1 | sed -E 's/^SHA-?256:[[:space:]]*//I')"
-                APK_SIGNER_INFO="jarsigner signer=$(echo "$JS_OUT" | grep -m1 -oE "CN=[^,]+")"
+                          | grep -m1 -oEi "SHA-?256:[[:space:]]*[0-9A-Fa-f:]{95,}" \
+                          | sed -E 's/^SHA-?256:[[:space:]]*//I' || true)"
+                APK_SIGNER_INFO="jarsigner signer=$(echo "$JS_OUT" | grep -m1 -oE "CN=[^,]+" || true)"
               fi
             fi
 
