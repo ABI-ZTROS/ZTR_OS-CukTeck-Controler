@@ -20,11 +20,14 @@ class CuktechScanResult {
 
 /// Android BLE 扫描器（基于 flutter_blue_plus）
 ///
-/// 支持：
-///   - 按 Service UUID (0xFE95) 过滤
-///   - 按名称前缀 (njcuk) 过滤
-///   - 手动输入 MAC 直连
-///   - 5 秒超时 + 3 次重试
+/// 🔑 识别策略（和 Python 参照完全一致）：
+///   - **主要标识**: Service UUID 0xFE95 — 小米 IoT 设备广播服务
+///   - **次要标识**: 名字/MAC 中的 cuktech 关键词（仅用于日志和标记，不做过滤）
+///   - **权威验证**: 连接后用 beaconKey 做 MiOT 认证 — 这才是最终判定
+///
+/// ⚠️ 为什么不靠名字？米家可以远程改设备蓝牙广播名！
+///    一旦改名成 "酷态科充电器" 或别的，`contains('njcuk')` 就挂了。
+///    Service UUID 0xFE95 是芯片硬编码，永远不变。
 class AndroidScanner {
   AndroidScanner._();
   static final AndroidScanner instance = AndroidScanner._();
@@ -39,7 +42,7 @@ class AndroidScanner {
   /// 开始扫描
   ///
   /// [timeout] 扫描时长（默认 10 秒）
-  /// [filterCuktech] 是否仅显示酷态科设备
+  /// [filterCuktech] 是否仅显示酷态科设备（已硬编码：只有 0xFE95 才算）
   Future<List<CuktechScanResult>> start({
     Duration timeout = const Duration(seconds: 10),
     bool filterCuktech = true,
@@ -55,22 +58,28 @@ class AndroidScanner {
       _sub = FlutterBluePlus.onScanResults.listen((results) {
         for (final r in results) {
           final name = r.advertisementData.localName ?? r.device.platformName ?? '';
-          final isCuktech =
-              name.toLowerCase().contains('njcuk') ||
-              r.device.remoteId.str.toLowerCase().contains('cuk');
-          // 检查 Service UUID 0xFE95
+
+          // 🔑 Service UUID 0xFE95 = 小米 IoT BLE 设备的硬编码广播服务
+          // 这是唯一可靠的硬件标识 — 芯片写死，米家改不了
           final hasFe95 = r.advertisementData.serviceUuids
-              .any((u) => u.str == uuidFe95);
-          if (!filterCuktech || isCuktech || hasFe95) {
+              .any((u) => u.str.toLowerCase() == uuidFe95.toLowerCase());
+
+          // 名字里带 cuk 关键词（仅用于日志标记，不做过滤）
+          final hasNameHint = name.toLowerCase().contains('cuk') ||
+              name.toLowerCase().contains('charger') ||
+              name.toLowerCase().contains('power');
+
+          if (hasFe95 || !filterCuktech) {
             _results.add(CuktechScanResult(
               device: r.device,
               rssi: r.rssi,
               localName: name,
-              isCuktech: isCuktech || hasFe95,
+              isCuktech: hasFe95, // ✅ 只靠 0xFE95 判定
             ));
             AppLogger.instance.d(
               'AndroidScanner',
-              'Found ${r.device.remoteId.str} rssi=${r.rssi} name=$name',
+              '📡 Found ${r.device.remoteId.str} rssi=${r.rssi} '
+              'name="$name" fe95=$hasFe95 nameHint=$hasNameHint',
             );
           }
         }
@@ -78,7 +87,8 @@ class AndroidScanner {
         AppLogger.instance.e('AndroidScanner', 'Scan error: $e', stackTrace);
       });
 
-      // 开始扫描
+      // 开始扫描 — 🔑 关键：只扫 Service UUID 0xFE95 的设备
+      // flutter_blue_plus 在 Android 上会做后台过滤，只返回包含此 UUID 的广播
       await FlutterBluePlus.startScan(
         withServices: [Guid(uuidFe95)],
         timeout: timeout,
@@ -87,6 +97,8 @@ class AndroidScanner {
       // 超时结束
       await Future<void>.delayed(timeout);
       await stop();
+      AppLogger.instance.i('AndroidScanner',
+          '🔍 Scan done: ${_results.length} device(s) found');
       return results;
     } catch (e, stackTrace) {
       AppLogger.instance.e('AndroidScanner', 'Scan failed: $e', stackTrace);
