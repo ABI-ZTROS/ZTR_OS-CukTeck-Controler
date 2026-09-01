@@ -134,6 +134,8 @@ jobs:
           echo "=== 最终 release buildType 段（Python 解析，括号平衡准确，无 awk 转义 warning） ==="
           python3 .github/inspect-gradle-buildtypes.py "$GRADLE"
 
+      # 注：libsu 已弃用，改用 Runtime.exec 直接探测 KernelSU/Magisk 的 su 入口
+
       # ------------ 3. Flutter 构建（release + split-per-abi） ------------
       - name: Build APK — release 签名
         working-directory: android_app

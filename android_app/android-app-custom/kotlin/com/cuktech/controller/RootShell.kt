@@ -2,61 +2,100 @@ package com.cuktech.controller
 
 import android.util.Log
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
- * RootShell v2 —— 适配 KernelSU 的非阻塞自动夺权桥
+ * RootShell v4 —— KernelSU 原生适配（不依赖 libsu）
  *
- * 核心目标：
- *   App 启动时 3~5 秒内确定 root 是否可用，**绝不阻塞 UI 线程**，
- *   并把 root 管理器（KernelSU / Magisk / 未知）+ 失败原因 + 操作建议
- *   以结构化 JSON 回传给 Dart 层渲染成中文徽章。
+ * 核心设计：
+ * ──────────────────────────────────────────────────────────────
+ * KernelSU 和 Magisk 最大的不同在于：**KernelSU 默认没有 su 命令**。
+ * KernelSU 的 root 入口是：
  *
- * 🔑 为什么 KernelSU 以前会卡 / 会"提示未找到 root"？
- *   1) 旧代码在主线程 `Runtime.exec().waitFor()` 同步阻塞
- *      → KernelSU 没有"自动响应"时，`su` 一直不退出 → ANR
- *   2) 旧代码没有超时 → 即使用户点了授权，也可能被 su 守护进程拒
- *   3) 旧代码不区分 KSU / Magisk → 提示笼统
+ *   ① /data/adb/ksud debug su -c "cmd"   ← 万能钥匙，所有 KernelSU 版本
+ *   ② /data/adb/ksu/bin/su -c "cmd"      ← KernelSU >= 0.9.5 提供的 su
+ *   ③ su -c "cmd"                          ← 依赖 sucompat 或 Magisk 常规
  *
- * ⚙️ KernelSU 自动授权建议（给中文 UI 显示）：
- *   打开 KernelSU 管理器 → 「超级用户」 → 找到本 App → 打开
- *   「自动响应」(Auto Response) → 保存。
- *   开了之后再进我们 App，`acquireRoot()` 会秒级返回 uid=0。
+ * 我们按优先级依次尝试每个入口，直接用 Runtime.exec() 执行命令，
+ * 简单、可靠、不搞花活。
+ *
+ * 成功的 su 入口会被缓存（workingSuEntryCache），后续命令直接用，
+ * 不用每次重新探测。
+ * ──────────────────────────────────────────────────────────────
  */
 class RootShell {
 
     companion object {
         private const val TAG = "RootShell"
 
-        /** 常见 su 路径（KernelSU / Magisk / SuperSU） */
-        private val SU_CANDIDATES = listOf(
-            "/system/bin/su",
-            "/system/xbin/su",
-            "/sbin/su",
-            "/debug_ramdisk/su",
-            "/data/adb/ksu/bin/su",       // KernelSU >= 0.9.5
-            "/data/adb/magisk/magisk64",   // Magisk 安装位
-            "/data/adb/ksud",              // KernelSU 守护进程（检测用）
+        /**
+         * 按优先级排序的 su 入口。
+         * 每个条目包含：名称（诊断用）、可执行路径、以及把命令转成 argv 的 lambda。
+         */
+        private val SU_ENTRIES = listOf<SuEntry>(
+            // ① KernelSU 守护进程（万能钥匙，所有版本都有 ksud）
+            SuEntry(
+                name = "KernelSU ksud",
+                executable = "/data/adb/ksud",
+                argvFor = { cmd -> arrayOf("/data/adb/ksud", "debug", "su", "-c", cmd) },
+            ),
+            // ② KernelSU >= 0.9.5 提供的专用 su 二进制
+            SuEntry(
+                name = "KernelSU su bin",
+                executable = "/data/adb/ksu/bin/su",
+                argvFor = { cmd -> arrayOf("/data/adb/ksu/bin/su", "-c", cmd) },
+            ),
+            // ③ KernelSU sucompat 或 Magisk 的 /system/bin/su
+            SuEntry(
+                name = "/system/bin/su",
+                executable = "/system/bin/su",
+                argvFor = { cmd -> arrayOf("/system/bin/su", "-c", cmd) },
+            ),
+            // ④ 极旧设备路径
+            SuEntry(
+                name = "/system/xbin/su",
+                executable = "/system/xbin/su",
+                argvFor = { cmd -> arrayOf("/system/xbin/su", "-c", cmd) },
+            ),
+            // ⑤ 依赖 PATH（sucompat 或 Magisk 都可能把 su 放进 PATH）
+            SuEntry(
+                name = "PATH su",
+                executable = "su",
+                argvFor = { cmd -> arrayOf("su", "-c", cmd) },
+            ),
         )
 
-        /** 命令白名单 — 仅允许这些前缀 */
         private val ALLOWED_PREFIXES = listOf(
             "sqlite3 ", "id", "cp ", "chmod ", "cat ", "ls -la ", "ls ",
-            "echo ", "rm ", "base64", "od -A", "od ", "stat ",
+            "echo ", "rm ", "base64", "od -A", "od ", "stat ", "ksud ",
         )
     }
 
     // =================== 类型定义 ===================
+
+    private data class SuEntry(
+        val name: String,
+        val executable: String,
+        val argvFor: (String) -> Array<String>,
+    )
+
+    data class SuProbeOutcome(
+        val entryName: String,
+        val available: Boolean,
+        val uid: Int?,
+        val exitCode: Int?,
+        val error: String?,
+    )
 
     enum class RootManager(val key: String, val displayCn: String) {
         KERNEL_SU("kernelsu", "KernelSU"),
@@ -67,13 +106,15 @@ class RootShell {
     }
 
     data class ProbeResult(
-        val ok: Boolean,              // true = uid=0, 已获得 root
+        val ok: Boolean,
         val manager: RootManager,
-        val suVersionText: String,    // su -V / uname 的原始输出
-        val uid: Int?,                // 若成功 = 0
-        val timeoutMs: Long,          // 本次探测超时阈值
-        val suggestion: String,       // 给用户的中文建议
-        val rawError: String? = null, // 异常文本
+        val suVersionText: String,
+        val uid: Int?,
+        val timeoutMs: Long,
+        val suggestion: String,
+        val rawError: String? = null,
+        val detectionMethod: String = "",
+        val probeDetails: List<SuProbeOutcome> = emptyList(),
     ) {
         fun toJson(): JSONObject {
             val j = JSONObject()
@@ -86,271 +127,319 @@ class RootShell {
             j.put("timeoutMs", timeoutMs)
             j.put("suggestion", suggestion)
             j.put("rawError", rawError ?: JSONObject.NULL)
+            j.put("detectionMethod", detectionMethod)
+
+            val arr = JSONArray()
+            for (d in probeDetails) {
+                arr.put(JSONObject().apply {
+                    put("entry", d.entryName)
+                    put("available", d.available)
+                    put("uid", d.uid ?: JSONObject.NULL)
+                    put("exitCode", d.exitCode ?: JSONObject.NULL)
+                    put("error", d.error ?: JSONObject.NULL)
+                })
+            }
+            j.put("probeDetails", arr)
             return j
         }
 
-        // — 与 Dart RootState 枚举对齐 —
         private fun stateKey(): String = when {
             ok -> "available"
-            timeoutMs == -1L && rawError == null && manager == RootManager.NONE -> "none"
-            manager != RootManager.NONE && !ok -> "denied"
+            manager == RootManager.NONE -> "none"
             rawError?.contains("TIMEOUT") == true -> "timeout"
+            manager != RootManager.NONE && !ok -> "denied"
             rawError != null -> "error"
             else -> "denied"
         }
     }
 
-    // =================== 管理层探测（Node 级 + 版本级） ===================
+    // =================== 运行时缓存 ===================
 
-    /** 检查物理上是否存在 KernelSU/Magisk/APatch 的痕迹 */
-    fun detectRootManager(pair: Pair<String, String>? = null): RootManager {
-        // 1. 检查路径（最可靠）
-        val candidatesHit = SU_CANDIDATES.filter { File(it).exists() }
-        val hasKsuNode = candidatesHit.any {
-            it.contains("ksu") || it == "/debug_ramdisk/su"
-        } || File("/data/adb/ksud").exists() || File("/data/adb/modules").exists() &&
-                !File("/data/adb/magisk").exists() &&
-                File("/proc/version").existsSafely() &&
-                readTextSafely("/proc/version").contains("kernelsu", true)
-        if (hasKsuNode) return RootManager.KERNEL_SU
+    /** 缓存上次成功的 su 入口，下次命令直接用，避免重复探测 */
+    private val workingEntryCache = ConcurrentHashMap<String, SuEntry>()
 
-        if (File("/data/adb/magisk").exists() ||
-            candidatesHit.any { it.contains("magisk") }) {
-            return RootManager.MAGISK
-        }
-        if (File("/data/adb/apd").exists() ||
-            candidatesHit.any { it.contains("apatch") }) {
+    private fun cacheKey() = "default"
+
+    // =================== 管理层探测 ===================
+
+    /** 检测 root 管理器类型（物理痕迹优先，行为探测次之） */
+    fun detectRootManager(): RootManager {
+        // 1. KernelSU 专属：ksud 守护进程
+        if (File("/data/adb/ksud").exists()) return RootManager.KERNEL_SU
+
+        // 2. /proc/version 内核字符串标记
+        if (readTextSafe("/proc/version").contains("kernelsu", ignoreCase = true))
+            return RootManager.KERNEL_SU
+
+        // 3. KernelSU su 二进制
+        if (File("/data/adb/ksu/bin/su").exists()) return RootManager.KERNEL_SU
+
+        // 4. Magisk 标记
+        if (File("/data/adb/magisk").exists()) return RootManager.MAGISK
+
+        // 5. APatch
+        if (File("/data/adb/apd").exists() || File("/data/adb/apatch").exists())
             return RootManager.APATCH
-        }
 
-        // 2. su -V 版本输出
-        val versionText = pair ?: probeSuVersion()
-        val v = versionText.second.lowercase()
+        // 6. 通过 su -V 输出版本号判断
+        val v = probeSuVersionText()
+        val vl = v.lowercase()
         return when {
-            v.contains("kernelsu") || v.contains(" ksu-") || v.contains("ksu version")
-                -> RootManager.KERNEL_SU
-            v.contains("magisk") -> RootManager.MAGISK
-            v.contains("apatch") -> RootManager.APATCH
+            vl.contains("kernelsu") || vl.contains("ksu") -> RootManager.KERNEL_SU
+            vl.contains("magisk") -> RootManager.MAGISK
+            vl.contains("apatch") || vl.contains("apd") -> RootManager.APATCH
             v.isNotBlank() -> RootManager.UNKNOWN
             else -> RootManager.NONE
         }
     }
 
-    private fun probeSuVersion(): Pair<String, String> {
-        // 尝试不同参数：KernelSU su 支持 -V、--version；Magisk 常用 -v
-        val attempts = listOf(
-            arrayOf("su", "-V"),
-            arrayOf("su", "--version"),
-            arrayOf("su", "-v"),
-        )
-        for (args in attempts) {
-            try {
-                val p = Runtime.getRuntime().exec(args)
-                val got = readAll(p, 800L).trim()
-                if (got.isNotBlank()) return Pair(args.joinToString(" "), got)
-            } catch (_: Throwable) {}
+    private fun probeSuVersionText(): String {
+        for (entry in SU_ENTRIES) {
+            if (!isEntryAvailable(entry)) continue
+            for (flag in arrayOf("-V", "--version", "-v")) {
+                try {
+                    val p = Runtime.getRuntime().exec(arrayOf(entry.executable, flag))
+                    val got = readAll(p, 500L).trim()
+                    if (got.isNotBlank()) return got
+                } catch (_: Throwable) {}
+            }
         }
-        return Pair("", "")
+        return ""
     }
 
-    // =================== 核心：非阻塞夺权 + 超时 ===================
+    /** 一个 su 入口是否物理可用（文件存在 或 在 PATH 中） */
+    private fun isEntryAvailable(entry: SuEntry): Boolean {
+        return if (entry.executable == "su") {
+            try {
+                val path = System.getenv("PATH") ?: ""
+                path.split(':').any { File(it).resolve("su").exists() }
+            } catch (_: Throwable) { false }
+        } else {
+            File(entry.executable).exists()
+        }
+    }
 
+    // =================== 核心：su 探测 + 夺权 ===================
+
+    /**
+     * 非阻塞探测 root：依次尝试所有 su 入口，找到能成功执行 "id" 并返回 uid=0 的入口。
+     *
+     * @param timeoutMs 每个入口的最大等待时间（超时可能是授权弹窗没点）
+     */
     suspend fun probeRoot(timeoutMs: Long = 5000L): ProbeResult =
         withContext(Dispatchers.IO) {
             val manager = detectRootManager()
-            val versionText = probeSuVersion().let { "${it.first} => ${it.second}" }
+            val suVer = probeSuVersionText()
 
             if (manager == RootManager.NONE) {
                 return@withContext ProbeResult(
-                    ok = false,
-                    manager = RootManager.NONE,
-                    suVersionText = versionText,
-                    uid = null,
+                    ok = false, manager = RootManager.NONE,
+                    suVersionText = suVer, uid = null,
                     timeoutMs = timeoutMs,
                     suggestion = "设备上未检测到 KernelSU / Magisk / APatch。" +
-                            "请先刷入 KernelSU 再回来（推荐 KernelSU ≥ 0.9.5，支持 su -V）。",
+                            "请先刷入 root（推荐 KernelSU）。",
+                    detectionMethod = "none_detected",
                 )
             }
 
-            // 3 次尝试避免 su 守护进程首次启动的抖动
+            Log.i(TAG, "检测到 root 管理器: ${manager.displayCn}，开始探测 su 入口…")
+
+            val details = mutableListOf<SuProbeOutcome>()
             var lastErr: String? = null
-            var uidGot: Int? = null
-            repeat(3) { attempt ->
-                val outcome = withTimeoutOrNull(timeoutMs) {
-                    tryRunSuId(timeoutMs, attempt)
+
+            for (entry in SU_ENTRIES) {
+                val avail = isEntryAvailable(entry)
+                if (!avail) {
+                    details.add(SuProbeOutcome(entry.name, false, null, null, "not available"))
+                    Log.d(TAG, "  ⏭ ${entry.name} → 不可用")
+                    continue
                 }
-                when (outcome) {
-                    null -> {
-                        // 超时 = KernelSU 弹了授权框但用户没点
-                        return@withContext ProbeResult(
-                            ok = false,
-                            manager = manager,
-                            suVersionText = versionText,
-                            uid = null,
-                            timeoutMs = timeoutMs,
-                            suggestion = buildSuggestionTimeout(manager),
-                            rawError = "TIMEOUT: su -c id 未在 ${timeoutMs}ms 内返回 " +
-                                    "(尝试${attempt + 1}/3) — 通常意味着授权框等待用户点击。",
-                        )
-                    }
-                    is SuRunOutcome.Success -> {
-                        uidGot = outcome.uid
-                        return@withContext ProbeResult(
-                            ok = true,
-                            manager = manager,
-                            suVersionText = versionText,
-                            uid = 0,
-                            timeoutMs = timeoutMs,
-                            suggestion = buildSuggestionSuccess(manager),
-                        )
-                    }
-                    is SuRunOutcome.Fail -> {
-                        lastErr = outcome.msg
-                        // 退避 200ms 再重试（KSU 冷启动守护进程会有一个短暂拒绝期）
-                        delay(200L)
-                    }
+
+                Log.d(TAG, "  🔍 ${entry.name}…")
+                val res = withTimeoutOrNull(timeoutMs) {
+                    executeRaw(entry, "id", timeoutMs)
                 }
+
+                if (res == null) {
+                    details.add(SuProbeOutcome(entry.name, true, null, null,
+                        "TIMEOUT ${timeoutMs}ms — 授权弹窗未确认?"))
+                    Log.w(TAG, "  ⏳ ${entry.name} → 超时")
+                    lastErr = "TIMEOUT: ${entry.name}"
+                    continue
+                }
+
+                details.add(SuProbeOutcome(
+                    entryName = entry.name,
+                    available = true,
+                    uid = res.uid,
+                    exitCode = res.exit,
+                    error = res.errorMsg,
+                ))
+
+                if (res.exit == 0 && res.uid == 0) {
+                    // ✅ 成功！缓存入口
+                    workingEntryCache[cacheKey()] = entry
+                    Log.i(TAG, "  ✅ ${entry.name} → uid=0")
+                    return@withContext ProbeResult(
+                        ok = true, manager = manager,
+                        suVersionText = suVer, uid = 0,
+                        timeoutMs = timeoutMs,
+                        suggestion = buildSuccessSuggestion(manager, entry.name),
+                        detectionMethod = "entry:${entry.name}",
+                        probeDetails = details,
+                    )
+                }
+
+                lastErr = "[${entry.name}] exit=${res.exit} uid=${res.uid} err=${res.errorMsg?.take(100)}"
+                Log.d(TAG, "  ❌ ${entry.name} → $lastErr")
             }
 
+            Log.w(TAG, "所有 su 入口均失败")
             ProbeResult(
-                ok = false,
-                manager = manager,
-                suVersionText = versionText,
-                uid = uidGot,
+                ok = false, manager = manager,
+                suVersionText = suVer, uid = null,
                 timeoutMs = timeoutMs,
-                suggestion = buildSuggestionDenied(manager),
+                suggestion = buildDeniedSuggestion(manager),
                 rawError = lastErr,
+                detectionMethod = "all_failed",
+                probeDetails = details,
             )
         }
 
-    // =================== 执行 ===================
+    // =================== 运行时命令执行 ===================
 
-    private sealed class SuRunOutcome {
-        data class Success(val uid: Int) : SuRunOutcome()
-        data class Fail(val msg: String) : SuRunOutcome()
-    }
-
-    /** 真正执行 su -c id 并解析 uid（不做超时，由上层 withTimeoutOrNull 控） */
-    private suspend fun tryRunSuId(overallTimeout: Long, attempt: Int): SuRunOutcome {
-        return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-            // 用短一点的单项等待，给外层 timeout 兜底
-            val stdout = readAll(p, overallTimeout - 200L)
-            val stderr = readErr(p, 300L)
-            val exit = safeWaitFor(p)
-            val uid = "uid=([0-9]+)".toRegex().find(stdout)?.groupValues?.get(1)?.toIntOrNull()
-            if (exit == 0 && uid == 0) {
-                SuRunOutcome.Success(0)
-            } else {
-                SuRunOutcome.Fail("exit=$exit uid=$uid stdout=\"$stdout\" stderr=\"$stderr\" att=$attempt")
-            }
-        } catch (t: Throwable) {
-            SuRunOutcome.Fail("EXCEPTION: ${t.javaClass.simpleName}: ${t.message}")
-        }
-    }
-
-    /** 老派 su 执行（用于 runCommand/readMiotDb，后台线程仍需要超时保护） */
+    /**
+     * 挂起函数：执行 root 命令，返回 stdout 字符串。
+     * 自动使用缓存的成功入口，否则依次尝试所有入口。
+     */
     suspend fun runCommandSuspend(command: String, timeoutMs: Long = 8000L): String {
         assertAllowed(command)
         return withContext(Dispatchers.IO) {
-            val outcome = withTimeoutOrNull(timeoutMs) {
-                try {
-                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-                    val stdout = readAll(p, timeoutMs - 500L)
-                    val stderr = readErr(p, 300L)
-                    val exit = safeWaitFor(p)
-                    if (exit == 0) stdout else "ERROR($exit): $stderr | stdout=$stdout"
-                } catch (t: Throwable) {
-                    "EXCEPTION: ${t.javaClass.simpleName}: ${t.message}"
+            // 1. 缓存命中
+            val cached = workingEntryCache[cacheKey()]
+            if (cached != null && isEntryAvailable(cached)) {
+                val r = executeRaw(cached, command, timeoutMs)
+                if (r.exit == 0) {
+                    return@withContext r.stdout.ifBlank { r.stderr }
+                }
+                Log.w(TAG, "缓存入口失效（exit=${r.exit}），重新探测…")
+            }
+
+            // 2. 依次尝试
+            for (entry in SU_ENTRIES) {
+                if (!isEntryAvailable(entry)) continue
+                val r = executeRaw(entry, command, timeoutMs)
+                if (r.exit == 0) {
+                    workingEntryCache[cacheKey()] = entry
+                    Log.i(TAG, "✅ ${command.take(30)} 通过 ${entry.name} 执行成功")
+                    return@withContext r.stdout.ifBlank { r.stderr }
                 }
             }
-            outcome ?: "TIMEOUT(${timeoutMs}ms): $command"
+            "ROOT_FAIL: all su entries failed for '${command.take(40)}'"
         }
     }
 
-    fun readMiotDb(dbPath: String, timeoutMs: Long = 12000L): Deferred<String> {
-        val escaped = dbPath.replace("\"", "\\\"").replace("\'", "\\\'")
+    /** 读取米家数据库（异步 Deferred），返回 base64 编码的 DB blob */
+    fun readMiotDb(dbPath: String, timeoutMs: Long = 12000L): kotlinx.coroutines.Deferred<String> {
+        val escaped = dbPath.replace("\"", "\\\"")
         val cmd = "cat \"$escaped\" | base64"
         assertAllowed(cmd)
-        return GlobalScope.async(Dispatchers.IO) {
-            val outcome = withTimeoutOrNull(timeoutMs) {
-                try {
-                    val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
-                    val out = readAll(p, timeoutMs - 1000L)
-                    val exit = safeWaitFor(p)
-                    if (exit == 0) out else "ERROR(exit=$exit): $out"
-                } catch (t: Throwable) {
-                    "EXCEPTION: ${t.javaClass.simpleName}: ${t.message}"
-                }
-            }
-            outcome ?: "TIMEOUT(${timeoutMs}ms): readMiotDb"
-        }
+        val scope = CoroutineScope(Dispatchers.IO)
+        return scope.async { runCommandSuspend(cmd, timeoutMs) }
     }
 
-    // —————— 兼容老同步 API（仅向后兼容，不要在新代码里调用） ——————
+    // =================== 老同步 API ===================
+
     fun checkRoot(): Boolean {
-        Log.w(TAG, "checkRoot(): blocking legacy call; please migrate to probeRoot()")
         return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", "id"))
-            val stdout = readAll(p, 3000L)
-            safeWaitFor(p)
-            stdout.contains("uid=0")
-        } catch (_: Throwable) {
-            false
-        }
+            runCommandSync("id").contains("uid=0")
+        } catch (_: Throwable) { false }
     }
+
     fun runCommand(command: String): String {
         assertAllowed(command)
-        return try {
-            val p = Runtime.getRuntime().exec(arrayOf("su", "-c", command))
-            val stdout = readAll(p, 5000L)
-            val stderr = readErr(p, 500L)
-            val exit = safeWaitFor(p)
-            if (exit == 0) stdout else "ERROR: $stderr"
-        } catch (e: SecurityException) { throw e }
-        catch (t: Throwable) { "EXCEPTION: ${t.message}" }
+        return runCommandSync(command)
     }
 
-    // =================== 工具 ===================
+    private fun runCommandSync(command: String): String {
+        return try {
+            val scope = CoroutineScope(Dispatchers.IO)
+            val def = scope.async { runCommandSuspend(command, 8000L) }
+            def.get(10L, TimeUnit.SECONDS)
+        } catch (t: Throwable) {
+            "EXCEPTION: ${t.message}"
+        }
+    }
+
+    // =================== 底层执行 ===================
+
+    private data class RawResult(
+        val stdout: String,
+        val stderr: String,
+        val exit: Int,
+        val uid: Int?,        // 从 stdout 解析的 uid（仅 "id" 命令）
+        val errorMsg: String?, // 方便诊断的错误摘要
+    )
+
+    /**
+     * 用指定 su 入口执行命令，返回 RawResult。
+     * 这是所有命令执行的最终底层。
+     */
+    private fun executeRaw(entry: SuEntry, cmd: String, timeoutMs: Long): RawResult {
+        return try {
+            val argv = entry.argvFor(cmd)
+            val p = Runtime.getRuntime().exec(argv)
+            val stdout = readAll(p, timeoutMs.coerceAtLeast(1000) - 500)
+            val stderr = readErr(p, 500L)
+            val exit = safeWaitFor(p)
+
+            val uid = if (cmd == "id" || cmd.startsWith("id")) {
+                "uid=([0-9]+)".toRegex().find(stdout)?.groupValues?.get(1)?.toIntOrNull()
+            } else null
+
+            val errMsg = when {
+                exit != 0 && stderr.isNotBlank() -> stderr.take(200)
+                exit != 0 -> "exit=$exit"
+                exit == 0 && uid != null && uid != 0 -> "not root uid=$uid"
+                else -> null
+            }
+
+            RawResult(stdout, stderr, exit, uid, errMsg)
+        } catch (t: Throwable) {
+            RawResult(
+                stdout = "", stderr = "", exit = -1, uid = null,
+                errorMsg = "EXCEPTION: ${t.javaClass.simpleName}: ${t.message}",
+            )
+        }
+    }
+
+    // =================== 工具函数 ===================
 
     private fun assertAllowed(cmd: String) {
         val c = cmd.trim()
-        if (ALLOWED_PREFIXES.none { prefix -> c.startsWith(prefix) }) {
+        if (ALLOWED_PREFIXES.none { c.startsWith(it) }) {
             throw SecurityException("命令不在白名单: $c")
         }
     }
 
-    private fun buildSuggestionSuccess(m: RootManager): String = when (m) {
-        RootManager.KERNEL_SU -> "✅ 已通过 KernelSU 获得 root（uid=0），" +
-                "可读取米家数据库。若后续升级 KSU 后失效，请重新打开" +
-                "KernelSU 管理器 → 超级用户 → 酷态科控制器 → 保存。"
+    private fun buildSuccessSuggestion(m: RootManager, entry: String) = when (m) {
+        RootManager.KERNEL_SU -> "✅ 已通过 KernelSU 获得 root（uid=0），可读取米家数据库。" +
+                "建议：在 KernelSU 管理器 → 超级用户 → 本 App → 自动响应设为「授予」。"
         RootManager.MAGISK -> "✅ 已通过 Magisk 获得 root（uid=0），可读取米家数据库。"
         RootManager.APATCH -> "✅ 已通过 APatch 获得 root（uid=0），可读取米家数据库。"
-        else -> "✅ root 可用。"
+        else -> "✅ root 可用（入口：$entry）。"
     }
 
-    private fun buildSuggestionTimeout(m: RootManager): String = when (m) {
-        RootManager.KERNEL_SU -> "⏳ KernelSU 等待授权超时。请依次操作：\n" +
+    private fun buildDeniedSuggestion(m: RootManager) = when (m) {
+        RootManager.KERNEL_SU -> "❌ KernelSU 拒绝了 su 请求。请依次操作：\n" +
                 "  ① 打开 KernelSU 管理器\n" +
                 "  ② 点击「超级用户」标签\n" +
-                "  ③ 找到「酷态科控制器」并点击进入\n" +
-                "  ④ 打开「自动响应」开关（自动授予 / 自动响应）\n" +
-                "  ⑤ 回到本 App，点击 Root 徽章「重试」。\n" +
-                "  完成后将在 1~2 秒内自动夺权成功。"
-        RootManager.MAGISK -> "⏳ Magisk 等待授权超时。请在 Magisk 的授权弹窗里点击「允许」，" +
-                "或在 Magisk → 超级用户里为本 App 选择「已授予」。"
-        RootManager.APATCH -> "⏳ APatch 等待授权超时。请在 APatch 授权弹窗里点击「允许」。"
-        else -> "⏳ root 授权超时。请检查你的 root 管理器是否为该 App 授予了权限。"
-    }
-
-    private fun buildSuggestionDenied(m: RootManager): String = when (m) {
-        RootManager.KERNEL_SU -> "❌ KernelSU 拒绝了本 App 的 su 请求（exit≠0 / uid≠0）。\n" +
-                "请打开 KernelSU 管理器 → 超级用户 → 酷态科控制器 → 确认「自动响应=授予」，" +
-                "而不是「拒绝」或「询问」。改完点击 Root 徽章「重试」。"
+                "  ③ 找到「酷态科控制器」并进入详情\n" +
+                "  ④ 确保开关为开启状态，「自动响应」设为「授予」\n" +
+                "  ⑤ 回到本 App，点击 Root 徽章「重试」"
         RootManager.MAGISK -> "❌ Magisk 拒绝了 su 请求。请在 Magisk → 超级用户中改为「已授予」。"
         RootManager.APATCH -> "❌ APatch 拒绝了 su 请求。请在 APatch 中授权本 App。"
-        else -> "❌ su 执行失败。root 管理器授权了，但执行 `su -c id` 没有返回 uid=0。" +
-                "请重启手机后重试；如果是系统级 SELinux 拦截，可在 KSU/Magisk 安装模块侧尝试。"
+        else -> "❌ su 执行失败。请确认 root 管理器已为本 App 授予 root 权限。"
     }
 
     private fun safeWaitFor(p: Process): Int = try {
@@ -373,7 +462,7 @@ class RootShell {
             val n = reader.read(buf)
             if (n <= 0) break
             sb.appendRange(buf, 0, n)
-            if (sb.length > 4 * 1024 * 1024) break // 最多读 4MB
+            if (sb.length > 4 * 1024 * 1024) break
         }
         return sb.toString().trim()
     }
@@ -393,13 +482,11 @@ class RootShell {
         return sb.toString().trim()
     }
 
-    private fun File.existsSafely(): Boolean = try { exists() } catch (_: Throwable) { false }
-    private fun readTextSafely(path: String): String {
+    private fun readTextSafe(path: String): String {
         return try { File(path).readText(Charsets.UTF_8) } catch (_: Throwable) { "" }
     }
 }
 
-/** 老 API 兼容常量 */
 object RootShellConstants {
     const val MIUI_DB_PATH = "/data/data/com.xiaomi.smarthome/databases/miio2.db"
 }
