@@ -461,11 +461,13 @@ class XiaomiLoginController {
       _cleanForSsecurity();
       _emitDebug('  ↳ AFTER CLEAN: [${_sessionCookies.keys.join(",")}]');
 
-      // Step 9
+      // Step 9 — ⚠️ 必须加回 userId cookie（clean 删掉了）
       _emitDebug('═══════ Step 9: fresh serviceLogin ═══════');
+      _emitDebug('  (extraCookies: userId=$_username)');
       final r9 = await _get(
         'https://account.xiaomi.com/pass/serviceLogin',
         params: {'sid': 'xiaomiio', '_json': 'true', 'cc': '+86'},
+        extraCookies: {'userId': _username},
       );
       final d9 = _parseXiaomiJson(r9.body);
       final sign = d9['_sign'] as String;
@@ -488,10 +490,10 @@ class XiaomiLoginController {
         return;
       }
 
-      // Step 10 — THE CRITICAL ONE
+      // Step 10 — THE CRITICAL ONE — ⚠️ 必须加 userId cookie
       _controller.add(LoginEvent.loading('正在完成登录...'));
       _emitDebug('═══════ Step 10: serviceLoginAuth2 (FINAL!) ═══════');
-      _emitDebug('POST /pass/serviceLoginAuth2 hash=${_passwordHash.substring(0, 8)}...');
+      _emitDebug('POST /pass/serviceLoginAuth2 hash=${_passwordHash.substring(0, 8)}... userId=$_username');
       final r10 = await _post(
         'https://account.xiaomi.com/pass/serviceLoginAuth2',
         params: {
@@ -504,6 +506,7 @@ class XiaomiLoginController {
           '_json': 'true',
           'cc': '+86',
         },
+        extraCookies: {'userId': _username},
       );
       final d10 = _parseXiaomiJson(r10.body);
       _emitDebug('  ↳ ${r10.statusCode} code=${d10['code']} secStatus=${d10['securityStatus']}');
