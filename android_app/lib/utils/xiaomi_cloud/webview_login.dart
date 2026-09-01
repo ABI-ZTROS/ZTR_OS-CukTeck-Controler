@@ -69,7 +69,38 @@ class XiaomiLoginController {
 
   final Map<String, String> _sessionCookies = {};
 
+  /// 🔒 锁定的 cookies — 不允许后续请求的 Set-Cookie 覆盖
+  /// Step 8 重定向后拿到的真实 serviceToken/passToken/identity_session
+  /// 会被 Step 9 serviceLogin 的占位 Set-Cookie 覆盖！必须锁死。
+  final Set<String> _lockedCookies = {};
+
   static const String _sdkVersion = 'accountsdk-18.8.15';
+
+  /// 锁定所有"有真实值"的 auth cookies（长度 > 7 说明不是占位值）
+  void _lockAuthCookies() {
+    for (final entry in _sessionCookies.entries) {
+      if (entry.value.length > 7) {
+        _lockedCookies.add(entry.key);
+      }
+    }
+    AppLogger.instance.i('XiaomiLogin',
+        '🔒 Locked cookies: [${_lockedCookies.join(",")}]');
+  }
+
+  /// 应用 Set-Cookie 响应头，但尊重锁定
+  void _applySetCookies(Map<String, String> newCookies) {
+    for (final entry in newCookies.entries) {
+      final name = entry.key;
+      final newValue = entry.value;
+      // 已锁定且新值是占位 → 不覆盖
+      if (_lockedCookies.contains(name)) {
+        AppLogger.instance.d('XiaomiLogin',
+            '  🔒 SKIP Set-Cookie $name (locked, newlen=${newValue.length})');
+        continue;
+      }
+      _sessionCookies[name] = newValue;
+    }
+  }
 
   Map<String, String> _extractSetCookies(String raw) {
     final result = <String, String>{};
@@ -138,7 +169,7 @@ class XiaomiLoginController {
 
     // 提取新 cookies
     final setCookieHeader = resp.headers['set-cookie'] ?? '';
-    _sessionCookies.addAll(_extractSetCookies(setCookieHeader));
+    _applySetCookies(_extractSetCookies(setCookieHeader));
 
     AppLogger.instance.d('XiaomiLogin',
         '  ↳ ${resp.statusCode}, body=${_truncate(resp.body, 200)}');
@@ -174,7 +205,7 @@ class XiaomiLoginController {
     final resp = await http.Response.fromStream(streamed);
 
     final setCookieHeader = resp.headers['set-cookie'] ?? '';
-    _sessionCookies.addAll(_extractSetCookies(setCookieHeader));
+    _applySetCookies(_extractSetCookies(setCookieHeader));
 
     AppLogger.instance.d('XiaomiLogin',
         '  ↳ ${resp.statusCode}, body=${_truncate(resp.body, 300)}');
@@ -212,7 +243,7 @@ class XiaomiLoginController {
       final setCookieHeader = resp.headers['set-cookie'] ?? '';
       if (setCookieHeader.isNotEmpty) {
         final newCookies = _extractSetCookies(setCookieHeader);
-        _sessionCookies.addAll(newCookies);
+        _applySetCookies(newCookies);
         _emitDebug('    ← collected cookies: [${newCookies.keys.join(",")}]');
       } else {
         _emitDebug('    ← no Set-Cookie in this step');
@@ -458,6 +489,10 @@ class XiaomiLoginController {
         if (_sessionCookies.containsKey('identity_session')) {
           _emitDebug('  ↳ identity_session LEN=${_sessionCookies['identity_session']!.length}');
         }
+
+        // 🔒 Step 8 后锁定真实 auth cookies！防止 Step 9/10 的占位 Set-Cookie 覆盖
+        _lockAuthCookies();
+        _emitDebug('  ↳ 🔒 Locked keys: [${_lockedCookies.join(",")}]');
 
         // Step 9 — ⚠️ 不 CLEAN！用完整 session（和 Python requests.Session 一致）
         _emitDebug('═══════ Step 9: fresh serviceLogin (FULL SESSION) ═══════');
