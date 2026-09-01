@@ -38,7 +38,7 @@ class MainActivity : FlutterActivity() {
     private fun MethodChannel.Result.postError(code: String, msg: String?, details: Any?) =
         safe { error(code, msg, details) }
 
-    private inline fun MethodChannel.Result.safe(block: () -> Unit) {
+    private fun MethodChannel.Result.safe(block: () -> Unit) {
         val activity: Activity? = this@MainActivity
         val runnable = Runnable {
             try {
