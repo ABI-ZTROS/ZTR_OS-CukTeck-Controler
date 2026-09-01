@@ -51,8 +51,10 @@ jobs:
         run: |
           # ---- Build signing config block as temp file ----
           cat > /tmp/signing_block.kts << 'BLOCK'
+          import java.util.Properties
+
           val keystorePropertiesFile = rootProject.file("key.properties")
-          val keystoreProperties = java.util.Properties()
+          val keystoreProperties = Properties()
           keystoreProperties.load(keystorePropertiesFile.inputStream())
 
           signingConfigs {
