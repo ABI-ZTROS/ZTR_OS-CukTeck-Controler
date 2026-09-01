@@ -1,7 +1,11 @@
 package com.cuktech.controller
 
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -264,11 +268,11 @@ class RootShell {
         }
     }
 
-    fun readMiotDb(dbPath: String, timeoutMs: Long = 12000L): kotlinx.coroutines.Deferred<String> {
+    fun readMiotDb(dbPath: String, timeoutMs: Long = 12000L): Deferred<String> {
         val escaped = dbPath.replace("\"", "\\\"").replace("\'", "\\\'")
         val cmd = "cat \"$escaped\" | base64"
         assertAllowed(cmd)
-        return kotlinx.coroutines.GlobalScope.async(Dispatchers.IO) {
+        return GlobalScope.async(Dispatchers.IO) {
             val outcome = withTimeoutOrNull(timeoutMs) {
                 try {
                     val p = Runtime.getRuntime().exec(arrayOf("su", "-c", cmd))
