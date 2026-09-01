@@ -50,4 +50,8 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
+    // 协程：让 su -c id / waitFor 不在主线程阻塞；超时控制也靠它
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.8.1")
+    // org.json 是 Android framework 自带，版本号无需写
 }

@@ -34,6 +34,7 @@ import '../widgets/power_ring.dart';
 import '../widgets/port_radial_button.dart';
 import '../widgets/status_banner.dart';
 import '../widgets/port_control_sheet.dart';
+import '../widgets/root_status_badge.dart';
 import 'device_info_page.dart';
 import 'log_page.dart';
 import 'settings_page.dart';
@@ -498,6 +499,11 @@ class _HomePageState extends State<HomePage>
             ),
           ),
           const Spacer(),
+          // Root 夺权状态徽章（单点击=重试夺权, 长按=打开KernelSU/Magisk/APatch管理器）
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: RootStatusBadge(),
+          ),
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.white70),
             onPressed: () => Navigator.of(context).push(
